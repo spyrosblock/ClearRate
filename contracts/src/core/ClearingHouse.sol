@@ -1,0 +1,494 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IRSInstrument} from "./IRSInstrument.sol";
+import {PositionMath} from "./PositionMath.sol";
+import {GlobalMarginVault} from "../margin/GlobalMarginVault.sol";
+import {RiskEngine} from "../margin/RiskEngine.sol";
+import {Whitelist} from "../access/Whitelist.sol";
+import {YieldCurveOracle} from "../oracles/YieldCurveOracle.sol";
+
+/// @title ClearingHouse
+/// @notice Central coordinator for IRS trade novation, VM settlement, and position compression.
+/// @dev Implements EIP-712 for gas-free matched trade submission and signature verification.
+contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
+    using ECDSA for bytes32;
+
+    // ─── Constants ──────────────────────────────────────────────────────
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    bytes32 public constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
+
+    /// @dev EIP-712 typehash for MatchedTrade struct.
+    bytes32 public constant MATCHED_TRADE_TYPEHASH = keccak256(
+        "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline)"
+    );
+
+    // ─── Structs ────────────────────────────────────────────────────────
+
+    /// @notice A matched trade agreement signed by both parties.
+    struct MatchedTrade {
+        bytes32 tradeId;            // Unique trade identifier
+        bytes32 partyA;             // AccountId of party A (pays fixed)
+        bytes32 partyB;             // AccountId of party B (receives fixed)
+        uint256 notional;           // Notional amount
+        uint256 fixedRateBps;       // Fixed rate in basis points
+        uint256 startDate;          // Swap effective date
+        uint256 maturityDate;       // Swap maturity date
+        uint256 paymentInterval;    // Payment frequency in seconds
+        uint8 dayCountConvention;   // Day-count convention
+        bytes32 floatingRateIndex;  // Floating rate index identifier
+        uint256 nonce;              // Replay protection nonce
+        uint256 deadline;           // Signature validity deadline
+    }
+
+    /// @notice A novated position record.
+    struct NovatedPosition {
+        bytes32 tradeId;
+        uint256 tokenIdA;           // ERC-1155 token ID for party A's leg
+        uint256 tokenIdB;           // ERC-1155 token ID for party B's leg
+        bytes32 partyA;
+        bytes32 partyB;
+        uint256 notional;
+        uint256 fixedRateBps;
+        uint256 startDate;
+        uint256 maturityDate;
+        bool active;
+        int256 lastNpv;             // Last mark-to-market NPV
+    }
+
+    /// @notice Variation margin settlement batch entry.
+    struct VMSettlement {
+        bytes32 accountId;
+        int256 vmAmount;            // Signed VM amount (positive = credit)
+    }
+
+    // ─── State ──────────────────────────────────────────────────────────
+
+    /// @notice Core protocol dependencies.
+    IRSInstrument public immutable instrument;
+    GlobalMarginVault public immutable marginVault;
+    RiskEngine public immutable riskEngine;
+    Whitelist public immutable whitelist;
+    YieldCurveOracle public immutable oracle;
+
+    /// @notice Novated positions indexed by tradeId.
+    mapping(bytes32 => NovatedPosition) public positions;
+
+    /// @notice Active position tradeIds for an account.
+    mapping(bytes32 => bytes32[]) public accountPositions;
+
+    /// @notice Used nonces per account for replay protection.
+    mapping(bytes32 => mapping(uint256 => bool)) public usedNonces;
+
+    /// @notice Trade IDs that have been submitted (prevents double-submission).
+    mapping(bytes32 => bool) public tradeSubmitted;
+
+    /// @notice Total number of active positions.
+    uint256 public activePositionCount;
+
+    /// @notice Protocol fee in BPS charged on notional per trade.
+    uint256 public protocolFeeBps;
+
+    /// @notice Protocol fee recipient address.
+    address public feeRecipient;
+
+    // ─── Events ─────────────────────────────────────────────────────────
+    event TradeSubmitted(
+        bytes32 indexed tradeId,
+        bytes32 indexed partyA,
+        bytes32 indexed partyB,
+        uint256 notional,
+        uint256 fixedRateBps
+    );
+    event TradeNovated(
+        bytes32 indexed tradeId,
+        uint256 tokenIdA,
+        uint256 tokenIdB
+    );
+    event VariationMarginSettled(
+        bytes32 indexed tradeId,
+        int256 npvChange,
+        uint256 timestamp
+    );
+    event PositionCompressed(
+        bytes32 indexed accountId,
+        bytes32 indexed tradeIdA,
+        bytes32 indexed tradeIdB,
+        uint256 notionalReduced
+    );
+    event PositionMatured(bytes32 indexed tradeId, uint256 timestamp);
+    event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+
+    // ─── Errors ─────────────────────────────────────────────────────────
+    error TradeAlreadySubmitted(bytes32 tradeId);
+    error InvalidSignature(bytes32 accountId);
+    error SignatureExpired(uint256 deadline);
+    error NonceAlreadyUsed(bytes32 accountId, uint256 nonce);
+    error PartyNotWhitelisted(bytes32 accountId);
+    error InsufficientMarginForTrade(bytes32 accountId);
+    error PositionNotActive(bytes32 tradeId);
+    error PositionNotMatured(bytes32 tradeId);
+    error InvalidNotional();
+    error InvalidTradeTerms();
+    error NotPartyToTrade(bytes32 accountId, bytes32 tradeId);
+    error PositionsNotCompressible();
+
+    // ─── Constructor ────────────────────────────────────────────────────
+
+    /// @notice Deploy the ClearingHouse.
+    /// @param admin The admin address.
+    /// @param instrument_ The IRSInstrument (ERC-1155) contract.
+    /// @param marginVault_ The GlobalMarginVault contract.
+    /// @param riskEngine_ The RiskEngine contract.
+    /// @param whitelist_ The Whitelist contract.
+    /// @param oracle_ The YieldCurveOracle contract.
+    constructor(
+        address admin,
+        address instrument_,
+        address marginVault_,
+        address riskEngine_,
+        address whitelist_,
+        address oracle_
+    ) EIP712("ClearRate CCP", "1") {
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(OPERATOR_ROLE, admin);
+        _grantRole(SETTLEMENT_ROLE, admin);
+
+        instrument = IRSInstrument(instrument_);
+        marginVault = GlobalMarginVault(marginVault_);
+        riskEngine = RiskEngine(riskEngine_);
+        whitelist = Whitelist(whitelist_);
+        oracle = YieldCurveOracle(oracle_);
+    }
+
+    // ─── Trade Submission ───────────────────────────────────────────────
+
+    /// @notice Submit a matched trade with EIP-712 signatures from both parties.
+    /// @param trade The matched trade details.
+    /// @param sigA Signature from party A.
+    /// @param sigB Signature from party B.
+    function submitMatchedTrade(
+        MatchedTrade calldata trade,
+        bytes calldata sigA,
+        bytes calldata sigB
+    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        // ── Validation ──
+        _validateTrade(trade);
+
+        // ── Signature Verification ──
+        _verifySignature(trade, trade.partyA, sigA);
+        _verifySignature(trade, trade.partyB, sigB);
+
+        // ── Whitelist Check ──
+        address ownerA = whitelist.getAccountOwner(trade.partyA);
+        address ownerB = whitelist.getAccountOwner(trade.partyB);
+        if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
+        if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
+
+        // ── Margin Check ──
+        uint256 tenor = trade.maturityDate - trade.startDate;
+        uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
+
+        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyA);
+        }
+        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyB);
+        }
+
+        // Mark trade as submitted
+        tradeSubmitted[trade.tradeId] = true;
+
+        emit TradeSubmitted(
+            trade.tradeId,
+            trade.partyA,
+            trade.partyB,
+            trade.notional,
+            trade.fixedRateBps
+        );
+
+        // ── Novation ──
+        _novate(trade, ownerA, ownerB, imRequired);
+    }
+
+    // ─── Variation Margin Settlement ────────────────────────────────────
+
+    /// @notice Settle variation margin for a batch of positions.
+    /// @dev Called by a keeper or CRE workflow with fresh NPV calculations.
+    /// @param settlements Array of VM settlement entries.
+    function settleVM(
+        VMSettlement[] calldata settlements
+    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
+        for (uint256 i; i < settlements.length; ++i) {
+            marginVault.settleVariationMargin(
+                settlements[i].accountId,
+                settlements[i].vmAmount
+            );
+        }
+    }
+
+    /// @notice Settle VM for a single position using fresh NPV data.
+    /// @param tradeId The trade to settle.
+    /// @param newNpv The new NPV from the fixed payer's perspective.
+    function settlePositionVM(
+        bytes32 tradeId,
+        int256 newNpv
+    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+
+        int256 npvChange = newNpv - pos.lastNpv;
+        pos.lastNpv = newNpv;
+
+        // Party A is the fixed payer: positive NPV change benefits A, debits B
+        if (npvChange != 0) {
+            marginVault.settleVariationMargin(pos.partyA, npvChange);
+            marginVault.settleVariationMargin(pos.partyB, -npvChange);
+        }
+
+        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
+    }
+
+    // ─── Position Compression ───────────────────────────────────────────
+
+    /// @notice Compress two offsetting positions for the same account.
+    /// @dev Both positions must involve the same account and have opposite directions.
+    ///      The notional of both is reduced by the minimum of the two.
+    /// @param tradeIdA First trade ID.
+    /// @param tradeIdB Second trade ID.
+    function compressPositions(
+        bytes32 tradeIdA,
+        bytes32 tradeIdB
+    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        NovatedPosition storage posA = positions[tradeIdA];
+        NovatedPosition storage posB = positions[tradeIdB];
+
+        if (!posA.active || !posB.active) revert PositionNotActive(tradeIdA);
+
+        // Find the common account
+        bytes32 commonAccount;
+        if (posA.partyA == posB.partyB) {
+            commonAccount = posA.partyA;
+        } else if (posA.partyB == posB.partyA) {
+            commonAccount = posA.partyB;
+        } else {
+            revert PositionsNotCompressible();
+        }
+
+        // Determine compression amount (minimum notional)
+        uint256 compressionAmount = posA.notional < posB.notional
+            ? posA.notional
+            : posB.notional;
+
+        // Reduce notionals
+        posA.notional -= compressionAmount;
+        posB.notional -= compressionAmount;
+
+        // Deactivate fully compressed positions
+        if (posA.notional == 0) posA.active = false;
+        if (posB.notional == 0) posB.active = false;
+
+        // Release IM proportionally
+        uint256 tenor = posA.maturityDate - posA.startDate;
+        uint256 imRelease = riskEngine.calculateIM(compressionAmount, tenor);
+        marginVault.releaseInitialMargin(commonAccount, imRelease);
+
+        emit PositionCompressed(commonAccount, tradeIdA, tradeIdB, compressionAmount);
+    }
+
+    // ─── Position Maturity ──────────────────────────────────────────────
+
+    /// @notice Settle a matured position and release locked margin.
+    /// @param tradeId The trade that has matured.
+    function settleMaturedPosition(
+        bytes32 tradeId
+    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+        if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
+
+        pos.active = false;
+        --activePositionCount;
+
+        // Release IM for both parties
+        uint256 tenor = pos.maturityDate - pos.startDate;
+        uint256 imRelease = riskEngine.calculateIM(pos.notional, tenor);
+
+        marginVault.releaseInitialMargin(pos.partyA, imRelease);
+        marginVault.releaseInitialMargin(pos.partyB, imRelease);
+
+        // Burn position tokens
+        address ownerA = whitelist.getAccountOwner(pos.partyA);
+        address ownerB = whitelist.getAccountOwner(pos.partyB);
+
+        if (instrument.balanceOf(ownerA, pos.tokenIdA) > 0) {
+            instrument.burnPosition(ownerA, pos.tokenIdA, pos.notional);
+        }
+        if (instrument.balanceOf(ownerB, pos.tokenIdB) > 0) {
+            instrument.burnPosition(ownerB, pos.tokenIdB, pos.notional);
+        }
+
+        emit PositionMatured(tradeId, block.timestamp);
+    }
+
+    // ─── Admin Functions ────────────────────────────────────────────────
+
+    /// @notice Set the protocol fee.
+    /// @param newFeeBps New fee in basis points.
+    function setProtocolFee(uint256 newFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        emit ProtocolFeeUpdated(protocolFeeBps, newFeeBps);
+        protocolFeeBps = newFeeBps;
+    }
+
+    /// @notice Set the fee recipient address.
+    /// @param recipient The new fee recipient.
+    function setFeeRecipient(address recipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        feeRecipient = recipient;
+    }
+
+    // ─── View Functions ─────────────────────────────────────────────────
+
+    /// @notice Get the EIP-712 digest for a matched trade.
+    /// @param trade The trade to hash.
+    /// @return The EIP-712 typed data hash.
+    function getTradeDigest(MatchedTrade calldata trade) external view returns (bytes32) {
+        return _hashTypedDataV4(_tradeStructHash(trade));
+    }
+
+    /// @notice Get all active position trade IDs for an account.
+    /// @param accountId The account to query.
+    /// @return Array of trade IDs.
+    function getAccountPositions(bytes32 accountId) external view returns (bytes32[] memory) {
+        return accountPositions[accountId];
+    }
+
+    /// @notice Get position details.
+    /// @param tradeId The trade ID to query.
+    /// @return The novated position struct.
+    function getPosition(bytes32 tradeId) external view returns (NovatedPosition memory) {
+        return positions[tradeId];
+    }
+
+    // ─── Internal Functions ─────────────────────────────────────────────
+
+    /// @dev Validate trade parameters.
+    function _validateTrade(MatchedTrade calldata trade) internal view {
+        if (tradeSubmitted[trade.tradeId]) revert TradeAlreadySubmitted(trade.tradeId);
+        if (block.timestamp > trade.deadline) revert SignatureExpired(trade.deadline);
+        if (trade.notional == 0) revert InvalidNotional();
+        if (trade.maturityDate <= trade.startDate) revert InvalidTradeTerms();
+        if (trade.fixedRateBps == 0) revert InvalidTradeTerms();
+        if (trade.paymentInterval == 0) revert InvalidTradeTerms();
+        if (trade.partyA == trade.partyB) revert InvalidTradeTerms();
+
+        // Nonce checks
+        if (usedNonces[trade.partyA][trade.nonce]) {
+            revert NonceAlreadyUsed(trade.partyA, trade.nonce);
+        }
+        if (usedNonces[trade.partyB][trade.nonce]) {
+            revert NonceAlreadyUsed(trade.partyB, trade.nonce);
+        }
+    }
+
+    /// @dev Verify an EIP-712 signature against an accountId.
+    function _verifySignature(
+        MatchedTrade calldata trade,
+        bytes32 accountId,
+        bytes calldata signature
+    ) internal view {
+        bytes32 digest = _hashTypedDataV4(_tradeStructHash(trade));
+        address signer = digest.recover(signature);
+        address expectedSigner = whitelist.getAccountOwner(accountId);
+        if (signer != expectedSigner) revert InvalidSignature(accountId);
+    }
+
+    /// @dev Compute the EIP-712 struct hash for a MatchedTrade.
+    function _tradeStructHash(MatchedTrade calldata trade) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                MATCHED_TRADE_TYPEHASH,
+                trade.tradeId,
+                trade.partyA,
+                trade.partyB,
+                trade.notional,
+                trade.fixedRateBps,
+                trade.startDate,
+                trade.maturityDate,
+                trade.paymentInterval,
+                trade.dayCountConvention,
+                trade.floatingRateIndex,
+                trade.nonce,
+                trade.deadline
+            )
+        );
+    }
+
+    /// @dev Execute novation: mint ERC-1155 position tokens and lock IM.
+    function _novate(
+        MatchedTrade calldata trade,
+        address ownerA,
+        address ownerB,
+        uint256 imRequired
+    ) internal {
+        // Mark nonces as used
+        usedNonces[trade.partyA][trade.nonce] = true;
+        usedNonces[trade.partyB][trade.nonce] = true;
+
+        // Mint Party A's position (PAY_FIXED)
+        IRSInstrument.SwapTerms memory termsA = IRSInstrument.SwapTerms({
+            notional: trade.notional,
+            fixedRateBps: trade.fixedRateBps,
+            startDate: trade.startDate,
+            maturityDate: trade.maturityDate,
+            paymentInterval: trade.paymentInterval,
+            direction: IRSInstrument.Direction.PAY_FIXED,
+            floatingRateIndex: trade.floatingRateIndex,
+            dayCountConvention: trade.dayCountConvention
+        });
+        uint256 tokenIdA = instrument.mintPosition(ownerA, termsA);
+
+        // Mint Party B's position (RECEIVE_FIXED)
+        IRSInstrument.SwapTerms memory termsB = IRSInstrument.SwapTerms({
+            notional: trade.notional,
+            fixedRateBps: trade.fixedRateBps,
+            startDate: trade.startDate,
+            maturityDate: trade.maturityDate,
+            paymentInterval: trade.paymentInterval,
+            direction: IRSInstrument.Direction.RECEIVE_FIXED,
+            floatingRateIndex: trade.floatingRateIndex,
+            dayCountConvention: trade.dayCountConvention
+        });
+        uint256 tokenIdB = instrument.mintPosition(ownerB, termsB);
+
+        // Lock Initial Margin for both parties
+        marginVault.lockInitialMargin(trade.partyA, imRequired);
+        marginVault.lockInitialMargin(trade.partyB, imRequired);
+
+        // Store novated position
+        positions[trade.tradeId] = NovatedPosition({
+            tradeId: trade.tradeId,
+            tokenIdA: tokenIdA,
+            tokenIdB: tokenIdB,
+            partyA: trade.partyA,
+            partyB: trade.partyB,
+            notional: trade.notional,
+            fixedRateBps: trade.fixedRateBps,
+            startDate: trade.startDate,
+            maturityDate: trade.maturityDate,
+            active: true,
+            lastNpv: 0
+        });
+
+        // Track positions per account
+        accountPositions[trade.partyA].push(trade.tradeId);
+        accountPositions[trade.partyB].push(trade.tradeId);
+
+        ++activePositionCount;
+
+        emit TradeNovated(trade.tradeId, tokenIdA, tokenIdB);
+    }
+}
