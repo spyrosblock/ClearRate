@@ -1,0 +1,13 @@
+{
+  "schedule": "0 0 */6 * * *",
+  "sofrApiUrl": "https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json",
+  "sofrApiBackupUrl": "https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json",
+  "evms": [
+    {
+      "yieldCurveOracleAddress": "0x0000000000000000000000000000000000000000",
+      "proxyAddress": "0x0000000000000000000000000000000000000000",
+      "chainSelectorName": "ethereum-testnet-sepolia",
+      "gasLimit": "1000000"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+# ClearRate Contract Deployments
+# Generated: 2026-02-21
+# Deployer: 0x993461BBf7e553eb5BD1F5248A72B524C4a3B15D
+
+# ================================================================================
+# HUB CHAIN (Ethereum Sepolia - Chain ID: 11155111)
+# ================================================================================
+
+# Core Contracts
+Whitelist: 
+0x0d90A0Df7Ff85d8d2E5fFfE1D1ef7eba26b58f1A
+
+GlobalMarginVault: 
+0x25748aD38C1162F8023aeeA21561b4ba3b2d79f1
+
+RiskEngine: 
+0x34B87470e0a759327A0D2ff5B3AF77A886fA278E
+
+YieldCurveOracle: 
+0x6F893cE60e1F4302731d2F81bDd75470c04a941c
+
+IRSInstrument: 
+0xcc224729D5831Fc552265ea033e4D5aEC5640587
+
+ClearingHouse: 
+0x6e72D579342e831174F6915Bf8F709aBd2739634
+
+InsuranceFund: 
+0x7482dEF427910fe68CccF9E353A40F405FFe2E52
+
+LiquidationEngine: 
+0xd87458FEe87CC09c36B0519649B81f046DD5230f
+
+# ================================================================================
+# SPOKE CHAIN (Base Sepolia - Chain ID: 84532)
+# ================================================================================
+
+# Base Sepolia Spoke Contracts
+BaseSepolia_LocalMarginVault:
+0xf5c678d1CF6391aa0fd15008A3C83F36F1B0f43D
+
+BaseSepolia_CCIPSpokeGateway:
+0x8c008619305dC27009d0c81E204C30F7c9726E9B
+
+# ================================================================================
+# SPOKE CHAIN (Arbitrum Sepolia - Chain ID: 421614)
+# ================================================================================
+
+# Arbitrum Sepolia Spoke Contracts
+ArbitrumSepolia_LocalMarginVault:
+0xf5c678d1CF6391aa0fd15008A3C83F36F1B0f43D
+
+ArbitrumSepolia_CCIPSpokeGateway:
+0x8c008619305dC27009d0c81E204C30F7c9726E9B
+
+# ================================================================================
+# NOTES
+# ================================================================================
+# - Hub and Spoke addresses may appear identical because the same deployer 
+#   account with the same nonce was used across chains.
+# - All contracts have been verified on their respective block explorers.
+# - CCIP Configuration:
+#   - Ethereum Sepolia Chain Selector: 16015286601757825753
+#   - Base Sepolia Chain Selector: 10344971235874465080
+#   - Arbitrum Sepolia Chain Selector: 3478487238524512106

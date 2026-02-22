@@ -32,6 +32,28 @@ abstract contract ClearRateScript is Script {
     uint64 internal constant BASE_SEPOLIA_CHAIN_SELECTOR = 580965213822371589;
     uint64 internal constant ARB_SEPOLIA_CHAIN_SELECTOR = 3478487238524512106;
 
+    // ─── CCIP Router Addresses ──────────────────────────────────────────
+    /// @notice CCIP Router address for Base Sepolia
+    /// @dev From DESCRIPTION.md: 0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93
+    address internal constant BASE_SEPOLIA_ROUTER = address(0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93);
+
+    /// @notice CCIP Router address for Arbitrum Sepolia
+    /// @dev From DESCRIPTION.md: 0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165
+    address internal constant ARB_SEPOLIA_ROUTER = address(0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165);
+
+    // ─── Chainlink Forwarder ─────────────────────────────────────────────
+    /// @notice Chainlink Forwarder address for CRE reports on Ethereum Sepolia
+    address internal constant CHAINLINK_ETHEREUM_SEPOLIA_FORWARDER = address(0x15fC6ae953E024d975e77382eEeC56A9101f9F88);
+
+    // ─── CCIP Onramp Addresses ──────────────────────────────────────────
+    /// @notice CCIP Onramp address for Base Sepolia (sending to Ethereum Sepolia)
+    /// @dev From DESCRIPTION.md: 0x28A025d34c830BF212f5D2357C8DcAB32dD92A20
+    address internal constant BASE_SEPOLIA_ONRAMP = address(0x28A025d34c830BF212f5D2357C8DcAB32dD92A20);
+
+    /// @notice CCIP Onramp address for Arbitrum Sepolia (sending to Ethereum Sepolia)
+    /// @dev From DESCRIPTION.md: 0x64d78F20aD987c7D52FdCB8FB0777bD00de53210
+    address internal constant ARB_SEPOLIA_ONRAMP = address(0x64d78F20aD987c7D52FdCB8FB0777bD00de53210);
+
     // ─── Initialization ─────────────────────────────────────────────────
 
     constructor() {
@@ -39,22 +61,73 @@ abstract contract ClearRateScript is Script {
         acceptedTokens.push(SEPOLIA_USDC);
         // Note: USDT and DAI would need to be added here for mainnet
 
-        // Initialize default tenors (30D, 90D, 180D, 1Y, 2Y, 5Y, 10Y)
-        defaultTenors.push(30 days);
-        defaultTenors.push(90 days);
-        defaultTenors.push(180 days);
-        defaultTenors.push(365 days);
-        defaultTenors.push(730 days);
-        defaultTenors.push(1825 days);
-        defaultTenors.push(3650 days);
+        // Initialize default tenors (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 7Y, 10Y, 30Y)
+        defaultTenors.push(30 days);    // 1M
+        defaultTenors.push(90 days);     // 3M
+        defaultTenors.push(180 days);    // 6M
+        defaultTenors.push(365 days);    // 1Y
+        defaultTenors.push(730 days);    // 2Y
+        defaultTenors.push(1095 days);   // 3Y
+        defaultTenors.push(1825 days);   // 5Y
+        defaultTenors.push(3650 days);   // 10Y
+        defaultTenors.push(10950 days);  // 30Y
     }
 
     // ─── Helper Functions ───────────────────────────────────────────────
 
-    /// @notice Get the deployer address from vm.
-    /// @return deployer The deployer address.
-    function getDeployer() internal view returns (address deployer) {
-        return msg.sender;
+    /// @notice Get the deployer address from the PRIVATE_KEY or DEPLOYER_PRIVATE_KEY environment variable.
+    /// @return deployer The deployer address derived from the private key.
+    function getDeployer() internal returns (address deployer) {
+        // Try to read DEPLOYER_PRIVATE_KEY from environment (from .env file)
+        string memory privateKeyStr = vm.envString("DEPLOYER_PRIVATE_KEY");
+        
+        // Remove "0x" prefix if present
+        if (bytes(privateKeyStr).length >= 2) {
+            bytes memory prefix = bytes(privateKeyStr);
+            if (prefix[0] == "0" && prefix[1] == "x") {
+                privateKeyStr = _substring(privateKeyStr, 2, bytes(privateKeyStr).length);
+            }
+        }
+        
+        // Convert hex string to uint256
+        uint256 privateKey = _parseHex(privateKeyStr);
+        deployer = vm.addr(privateKey);
+        
+        if (deployer == address(0)) {
+            // Fallback to msg.sender if we can't derive from env
+            deployer = msg.sender;
+        }
+    }
+
+    /// @dev Helper to extract substring
+    function _substring(string memory str, uint256 startIndex, uint256 endIndex) internal pure returns (string memory) {
+        bytes memory strBytes = bytes(str);
+        bytes memory result = new bytes(endIndex - startIndex);
+        for (uint256 i = startIndex; i < endIndex; i++) {
+            result[i - startIndex] = strBytes[i];
+        }
+        return string(result);
+    }
+
+    /// @dev Helper to parse hex string to uint256
+    function _parseHex(string memory hexStr) internal pure returns (uint256) {
+        bytes memory b = bytes(hexStr);
+        uint256 result = 0;
+        for (uint256 i = 0; i < b.length; i++) {
+            bytes1 currentByte = b[i];
+            uint256 digit;
+            if (currentByte >= bytes1("0") && currentByte <= bytes1("9")) {
+                digit = uint256(uint8(currentByte)) - uint256(uint8(bytes1("0")));
+            } else if (currentByte >= bytes1("a") && currentByte <= bytes1("f")) {
+                digit = 10 + uint256(uint8(currentByte)) - uint256(uint8(bytes1("a")));
+            } else if (currentByte >= bytes1("A") && currentByte <= bytes1("F")) {
+                digit = 10 + uint256(uint8(currentByte)) - uint256(uint8(bytes1("A")));
+            } else {
+                continue; // Skip non-hex characters
+            }
+            result = result * 16 + digit;
+        }
+        return result;
     }
 
     /// @notice Get accepted tokens for the hub.
@@ -78,20 +151,26 @@ abstract contract ClearRateScript is Script {
         }
     }
 
-    /// @notice Get the CCIP router address for a given chain.
-    /// @param chainSelector The CCIP chain selector.
-    /// @return router The CCIP router address.
+    /// @notice Get the CCIP router/onramp address for a given spoke chain.
+    /// @dev These are the onramp addresses used to SEND messages from the spoke TO the hub.
+    /// @param chainSelector The CCIP chain selector of the spoke chain.
+    /// @return router The CCIP onramp address.
     function getCCIPRouter(uint64 chainSelector) internal pure returns (address router) {
-        // These are placeholder router addresses - replace with actual CCIP router addresses
         if (chainSelector == BASE_SEPOLIA_CHAIN_SELECTOR) {
-            // Base Sepolia CCIP Router (placeholder - verify with Chainlink docs)
-            return address(0x2334936096ae3d5E5B4E0C4A3E3F3d2C1b0A0908);
+            // Base Sepolia -> Ethereum Sepolia onramp
+            return BASE_SEPOLIA_ONRAMP;
         } else if (chainSelector == ARB_SEPOLIA_CHAIN_SELECTOR) {
-            // Arbitrum Sepolia CCIP Router (placeholder)
-            return address(0x2334936096ae3d5E5B4E0C4A3E3F3d2C1b0A0908);
+            // Arbitrum Sepolia -> Ethereum Sepolia onramp
+            return ARB_SEPOLIA_ONRAMP;
         }
-        // Default/ETH Sepolia
-        return address(0x2334936096ae3d5E5B4E0C4A3E3F3d2C1b0A0908);
+        // Default: return Base Sepolia onramp
+        return BASE_SEPOLIA_ONRAMP;
+    }
+
+    /// @notice Get the Chainlink Forwarder address for CRE reports.
+    /// @return The forwarder address.
+    function getChainlinkForwarder() internal pure returns (address) {
+        return CHAINLINK_ETHEREUM_SEPOLIA_FORWARDER;
     }
 
     /// @notice Log a deployed contract address.

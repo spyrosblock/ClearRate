@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 
 /// @title YieldCurveOracle
 /// @notice Ingests discount factors from Chainlink CRE DON for yield curve pricing.
-/// @dev Discount factors are stored per tenor bucket and updated by authorized oracle reporters.
+/// @dev Discount factors are stored per tenor bucket and updated via the Chainlink CRE flow.
 ///      All discount factors are in WAD (1e18) precision.
-contract YieldCurveOracle is AccessControl {
+///      Inherits from ReceiverTemplate to receive reports directly from Chainlink CRE.
+contract YieldCurveOracle is ReceiverTemplate {
     // ─── Constants ──────────────────────────────────────────────────────
     uint256 internal constant WAD = 1e18;
-
-    bytes32 public constant ORACLE_REPORTER_ROLE = keccak256("ORACLE_REPORTER_ROLE");
 
     // ─── State ──────────────────────────────────────────────────────────
 
@@ -44,21 +43,19 @@ contract YieldCurveOracle is AccessControl {
     error TenorAlreadySupported(uint256 tenor);
     error TenorNotSupported(uint256 tenor);
     error InvalidStaleness();
+    error InvalidDataLength(uint256 expected, uint256 actual);
 
     // ─── Constructor ────────────────────────────────────────────────────
 
     /// @notice Deploy the YieldCurveOracle.
-    /// @param admin The address granted admin roles.
+    /// @param forwarder The Chainlink Forwarder address for CRE reports.
     /// @param initialMaxStaleness Maximum allowed staleness in seconds.
     /// @param initialTenors Array of initial supported tenor buckets (in seconds).
     constructor(
-        address admin,
+        address forwarder,
         uint256 initialMaxStaleness,
         uint256[] memory initialTenors
-    ) {
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(ORACLE_REPORTER_ROLE, admin);
-
+    ) ReceiverTemplate(forwarder) {
         if (initialMaxStaleness == 0) revert InvalidStaleness();
         maxStaleness = initialMaxStaleness;
 
@@ -71,23 +68,16 @@ contract YieldCurveOracle is AccessControl {
     // ─── External Functions ─────────────────────────────────────────────
 
     /// @notice Batch update discount factors for supported tenors.
-    /// @dev Called by Chainlink CRE DON or authorized reporter.
+    /// @dev Called by the contract owner.
     /// @param tenors Array of tenor buckets (must all be supported).
     /// @param factors Array of discount factors in WAD.
     function updateDiscountFactors(
         uint256[] calldata tenors,
         uint256[] calldata factors
-    ) external onlyRole(ORACLE_REPORTER_ROLE) {
+    ) external onlyOwner {
         if (tenors.length != factors.length) revert ArrayLengthMismatch();
 
-        for (uint256 i; i < tenors.length; ++i) {
-            if (!isSupportedTenor[tenors[i]]) revert UnsupportedTenor(tenors[i]);
-            // Discount factors must be > 0 and <= 1.0 (WAD)
-            if (factors[i] == 0 || factors[i] > WAD) {
-                revert InvalidDiscountFactor(tenors[i], factors[i]);
-            }
-            discountFactors[tenors[i]] = factors[i];
-        }
+        _updateDiscountFactors(tenors, factors);
 
         lastUpdateTimestamp = block.timestamp;
         emit DiscountFactorsUpdated(block.timestamp, tenors.length);
@@ -95,7 +85,7 @@ contract YieldCurveOracle is AccessControl {
 
     /// @notice Add a new supported tenor bucket.
     /// @param tenor The tenor in seconds to add.
-    function addTenor(uint256 tenor) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function addTenor(uint256 tenor) external onlyOwner {
         if (isSupportedTenor[tenor]) revert TenorAlreadySupported(tenor);
         supportedTenors.push(tenor);
         isSupportedTenor[tenor] = true;
@@ -104,7 +94,7 @@ contract YieldCurveOracle is AccessControl {
 
     /// @notice Remove a supported tenor bucket.
     /// @param tenor The tenor in seconds to remove.
-    function removeTenor(uint256 tenor) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function removeTenor(uint256 tenor) external onlyOwner {
         if (!isSupportedTenor[tenor]) revert TenorNotSupported(tenor);
         isSupportedTenor[tenor] = false;
         delete discountFactors[tenor];
@@ -123,10 +113,46 @@ contract YieldCurveOracle is AccessControl {
 
     /// @notice Update the maximum staleness threshold.
     /// @param newMaxStaleness New maximum staleness in seconds.
-    function setMaxStaleness(uint256 newMaxStaleness) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMaxStaleness(uint256 newMaxStaleness) external onlyOwner {
         if (newMaxStaleness == 0) revert InvalidStaleness();
         emit MaxStalenessUpdated(maxStaleness, newMaxStaleness);
         maxStaleness = newMaxStaleness;
+    }
+
+    // ─── Internal Functions ─────────────────────────────────────────────
+
+    /// @dev Internal function to update discount factors.
+    /// @param tenors Array of tenor buckets.
+    /// @param factors Array of discount factors in WAD.
+    function _updateDiscountFactors(uint256[] memory tenors, uint256[] memory factors) internal {
+        for (uint256 i; i < tenors.length; ++i) {
+            if (!isSupportedTenor[tenors[i]]) revert UnsupportedTenor(tenors[i]);
+            // Discount factors must be > 0 and <= 1.0 (WAD)
+            if (factors[i] == 0 || factors[i] > WAD) {
+                revert InvalidDiscountFactor(tenors[i], factors[i]);
+            }
+            discountFactors[tenors[i]] = factors[i];
+        }
+    }
+
+    // ─── ReceiverTemplate Implementation ────────────────────────────────
+
+    /// @notice Process the report data from Chainlink CRE.
+    /// @dev Called by ReceiverTemplate.onReport() after validation.
+    /// @param report ABI-encoded discount factor data (uint256[] tenors, uint256[] factors)
+    function _processReport(
+        bytes calldata report
+    ) internal override {
+        // Decode the report data: (uint256[] tenors, uint256[] factors)
+        (uint256[] memory tenors, uint256[] memory factors) = abi.decode(
+            report,
+            (uint256[], uint256[])
+        );
+
+        if (tenors.length != factors.length) revert InvalidDataLength(tenors.length, factors.length);
+
+        _updateDiscountFactors(tenors, factors);
+        lastUpdateTimestamp = block.timestamp;
     }
 
     // ─── View Functions ─────────────────────────────────────────────────

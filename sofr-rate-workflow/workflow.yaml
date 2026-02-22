@@ -1,0 +1,23 @@
+# ==========================================================================
+# CRE WORKFLOW SETTINGS — SOFR Rate Fetching Workflow
+# ==========================================================================
+# Fetches SOFR rates from NY Fed, bootstraps yield curve, and writes
+# discount factors to YieldCurveOracle.sol onchain.
+
+# ==========================================================================
+staging-settings:
+  user-workflow:
+    workflow-name: "sofr-rate-fetcher-staging"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../secrets.yaml"
+
+# ==========================================================================
+production-settings:
+  user-workflow:
+    workflow-name: "sofr-rate-fetcher-production"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: ""

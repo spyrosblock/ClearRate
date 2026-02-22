@@ -15,7 +15,6 @@ import {LiquidationEngine} from "../src/liquidation/LiquidationEngine.sol";
 /// @title DeployHub
 /// @notice Deployment script for the Hub chain (Ethereum Sepolia) contracts.
 /// @dev Run with: forge script script/DeployHub.s.sol --rpc-url sepolia --broadcast --verify
-///      Or for local testing: forge script script/DeployHub.s.sol -vvvv
 ///
 /// Deployment order:
 /// 1. Whitelist - KYC/governance-controlled address registry
@@ -32,31 +31,24 @@ contract DeployHub is ClearRateScript {
     bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
     bytes32 internal constant MARGIN_OPERATOR_ROLE = keccak256("MARGIN_OPERATOR_ROLE");
+    bytes32 internal constant RISK_ADMIN_ROLE = keccak256("RISK_ADMIN_ROLE");
+    bytes32 internal constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
+    bytes32 internal constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
+    bytes32 internal constant WHITELIST_ADMIN_ROLE = keccak256("WHITELIST_ADMIN_ROLE");
 
     // ─── Risk Parameters ───────────────────────────────────────────────
-    /// @notice Confidence level for IM calculation (99% = 9900 BPS)
     uint256 internal constant CONFIDENCE_BPS = 9900;
-    
-    /// @notice Maintenance margin as percentage of IM (75% = 7500 BPS)
     uint256 internal constant MM_RATIO_BPS = 7500;
 
     // ─── Oracle Parameters ─────────────────────────────────────────────
-    /// @notice Maximum staleness for oracle data (1 day)
     uint256 internal constant MAX_STALENESS = 1 days;
 
     // ─── Liquidation Parameters ────────────────────────────────────────
-    /// @notice Dutch auction duration (1 hour)
     uint256 internal constant AUCTION_DURATION = 1 hours;
-    
-    /// @notice Starting premium for liquidation auctions (5% = 500 BPS)
     uint256 internal constant START_PREMIUM_BPS = 500;
 
-    // ─── Configuration ─────────────────────────────────────────────────
-
     /// @notice Main entry point for deployment.
-    /// @dev Fetches tokens from base class and deploys all hub contracts.
     function run() external {
-        // Get the deployer address
         address deployer = getDeployer();
 
         console.log("========================================");
@@ -64,32 +56,15 @@ contract DeployHub is ClearRateScript {
         console.log("========================================");
         console.log("Deployer:");
         console.logAddress(deployer);
-        console.log("\nChain: Ethereum Sepolia");
-        console.log("Chain Selector:");
-        console.logUint(ETH_SEPOLIA_CHAIN_SELECTOR);
 
-        // Get accepted tokens for hub
         address[] memory tokens = getHubTokens();
-
-        console.log("\nAccepted Collateral Tokens:");
-        for (uint256 i; i < tokens.length; ++i) {
-            console.logAddress(tokens[i]);
-        }
-
-        // Get supported tenors
         uint256[] memory tenors = new uint256[](defaultTenors.length);
         for (uint256 i; i < defaultTenors.length; ++i) {
             tenors[i] = defaultTenors[i];
         }
 
-        console.log("\nSupported Tenors (seconds):");
-        for (uint256 i; i < tenors.length; ++i) {
-            console.log(string(abi.encodePacked("  ", _uint2str(tenors[i]), "s")));
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        //  DEPLOY CORE CONTRACTS
-        // ═══════════════════════════════════════════════════════════════
+        // Start broadcasting all transactions from deployer
+        vm.startBroadcast(deployer);
 
         // 1. Deploy Whitelist
         console.log("\n[1/8] Deploying Whitelist...");
@@ -114,13 +89,13 @@ contract DeployHub is ClearRateScript {
         // 4. Deploy YieldCurveOracle
         console.log("\n[4/8] Deploying YieldCurveOracle...");
         YieldCurveOracle oracle = new YieldCurveOracle(
-            deployer,
+            getChainlinkForwarder(),
             MAX_STALENESS,
             tenors
         );
         logDeployment("YieldCurveOracle", address(oracle));
 
-        // 5. Deploy IRSInstrument (ERC-1155)
+        // 5. Deploy IRSInstrument
         console.log("\n[5/8] Deploying IRSInstrument...");
         IRSInstrument instrument = new IRSInstrument(
             deployer,
@@ -139,10 +114,6 @@ contract DeployHub is ClearRateScript {
             address(oracle)
         );
         logDeployment("ClearingHouse", address(clearingHouse));
-
-        // ═══════════════════════════════════════════════════════════════
-        //  DEPLOY BACKSTOP CONTRACTS
-        // ═══════════════════════════════════════════════════════════════
 
         // 7. Deploy InsuranceFund
         console.log("\n[7/8] Deploying InsuranceFund...");
@@ -173,22 +144,33 @@ contract DeployHub is ClearRateScript {
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         marginVault.grantRole(MARGIN_OPERATOR_ROLE, deployer);
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on GlobalMarginVault");
-        console.log("- Granted MARGIN_OPERATOR_ROLE to deployer on GlobalMarginVault");
 
-        // Grant CLEARING_HOUSE_ROLE to ClearingHouse on IRSInstrument
+        // Grant roles to IRSInstrument
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on IRSInstrument");
 
-        // Grant CLEARING_HOUSE_ROLE to ClearingHouse on RiskEngine
+        // Grant roles to RiskEngine
         riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        riskEngine.grantRole(RISK_ADMIN_ROLE, deployer);
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on RiskEngine");
 
-        // Grant CLEARING_HOUSE_ROLE to ClearingHouse on InsuranceFund
+        // Grant roles to InsuranceFund
         insuranceFund.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        insuranceFund.grantRole(FUND_MANAGER_ROLE, deployer);
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on InsuranceFund");
 
-        // Set default risk weights for common tenors
+        // Grant roles to LiquidationEngine
+        liquidationEngine.grantRole(LIQUIDATOR_ROLE, deployer);
+        console.log("- Granted LIQUIDATOR_ROLE to deployer on LiquidationEngine");
+
+        // Grant roles to Whitelist
+        whitelist.grantRole(WHITELIST_ADMIN_ROLE, deployer);
+        console.log("- Granted WHITELIST_ADMIN_ROLE to deployer on Whitelist");
+
+        // Set default risk weights
         _setDefaultRiskWeights(riskEngine);
+
+        vm.stopBroadcast();
 
         console.log("Roles configured successfully!");
 
@@ -201,83 +183,46 @@ contract DeployHub is ClearRateScript {
 
         names[0] = "Whitelist";
         addrs[0] = address(whitelist);
-
         names[1] = "GlobalMarginVault";
         addrs[1] = address(marginVault);
-
         names[2] = "RiskEngine";
         addrs[2] = address(riskEngine);
-
         names[3] = "YieldCurveOracle";
         addrs[3] = address(oracle);
-
         names[4] = "IRSInstrument";
         addrs[4] = address(instrument);
-
         names[5] = "ClearingHouse";
         addrs[5] = address(clearingHouse);
-
         names[6] = "InsuranceFund";
         addrs[6] = address(insuranceFund);
-
         names[7] = "LiquidationEngine";
         addrs[7] = address(liquidationEngine);
 
         logAllDeployments(names, addrs);
 
         console.log("Hub deployment complete!");
-        console.log("\n========================================");
-        console.log("NEXT STEPS:");
-        console.log("========================================");
-        console.log("1. Verify all contracts on Etherscan");
-        console.log("2. Add participants to Whitelist");
-        console.log("3. Configure oracle with initial discount factors");
-        console.log("4. Set up CCIP Spoke gateways on L2s");
-        console.log("5. Register spoke gateways on ClearingHouse");
     }
 
-    /// @dev Set default risk weights for common tenors.
-    /// @param riskEngine The RiskEngine contract instance.
     function _setDefaultRiskWeights(RiskEngine riskEngine) internal {
-        // Risk weights in BPS (basis points)
-        // 30 days: 50 bps (0.5%)
         riskEngine.setRiskWeight(30 days, 50);
         console.log("- Set risk weight for 30 days: 50 BPS");
-
-        // 90 days: 100 bps (1%)
         riskEngine.setRiskWeight(90 days, 100);
         console.log("- Set risk weight for 90 days: 100 BPS");
-
-        // 180 days: 150 bps (1.5%)
         riskEngine.setRiskWeight(180 days, 150);
         console.log("- Set risk weight for 180 days: 150 BPS");
-
-        // 1 year: 200 bps (2%)
         riskEngine.setRiskWeight(365 days, 200);
         console.log("- Set risk weight for 365 days: 200 BPS");
-
-        // 2 years: 250 bps (2.5%)
         riskEngine.setRiskWeight(730 days, 250);
         console.log("- Set risk weight for 730 days: 250 BPS");
-
-        // 5 years: 400 bps (4%)
         riskEngine.setRiskWeight(1825 days, 400);
         console.log("- Set risk weight for 1825 days: 400 BPS");
-
-        // 10 years: 600 bps (6%)
         riskEngine.setRiskWeight(3650 days, 600);
         console.log("- Set risk weight for 3650 days: 600 BPS");
-
         console.log("Default risk weights configured");
     }
 
-    /// @dev Helper to convert uint256 to string.
-    /// @param value The uint256 to convert.
-    /// @return The string representation.
     function _uint2str(uint256 value) internal pure returns (string memory) {
-        if (value == 0) {
-            return "0";
-        }
+        if (value == 0) return "0";
         uint256 temp = value;
         uint256 digits;
         while (temp != 0) {

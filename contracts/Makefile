@@ -5,41 +5,6 @@
 	extract-abis snapshot
 
 # ============================================
-# DEFAULT TARGET
-# ============================================
-help:
-	@echo "ClearRate - Onchain CCP for Interest Rate Swaps"
-	@echo ""
-	@echo "Usage: make <target>"
-	@echo ""
-	@echo "=== Development ==="
-	@echo "  install            Install dependencies"
-	@echo "  build              Compile contracts"
-	@echo "  test               Run all tests"
-	@echo "  test-sepolia       Run tests with Sepolia fork"
-	@echo "  fork-anvil         Start anvil forked from Sepolia"
-	@echo "  snapshot           Generate gas snapshot"
-	@echo "  extract-abis       Extract ABIs for TypeScript"
-	@echo ""
-	@echo "=== Hub Deployment (Ethereum Sepolia) ==="
-	@echo "  deploy-hub-sepolia          Deploy hub contracts to Sepolia (broadcast)"
-	@echo "  deploy-hub-sepolia-sim      Simulate hub deployment (no broadcast)"
-	@echo "  deploy-hub-anvil            Deploy hub contracts to local anvil"
-	@echo ""
-	@echo "=== Spoke Deployment (L2 Testnets) ==="
-	@echo "  deploy-spoke-base-sepolia   Deploy spoke contracts to Base Sepolia"
-	@echo "  deploy-spoke-arb-sepolia    Deploy spoke contracts to Arbitrum Sepolia"
-	@echo ""
-	@echo "=== Verification ==="
-	@echo "  verify-hub          Verify hub contracts on Etherscan"
-	@echo "  verify-spoke        Verify spoke contracts on block explorers"
-	@echo ""
-	@echo "=== Environment ==="
-	@echo "  Requires: ETH_RPC_URL, ETH_KEYSTORE_ACCOUNT, ETHERSCAN_API_KEY"
-	@echo "  Or set them in .env file"
-	@echo ""
-
-# ============================================
 # INSTALLATION & BUILD
 # ============================================
 
@@ -76,24 +41,15 @@ snapshot:
 deploy-hub-sepolia:
 	@echo "Deploying Hub contracts to Ethereum Sepolia..."
 	forge script script/DeployHub.s.sol:DeployHub \
-		--rpc-url $(ETH_RPC_URL) \
-		--account $(ETH_KEYSTORE_ACCOUNT) \
+		--rpc-url sepolia \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \
 		--verify \
 		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api \
+		--verifier-url https://api.etherscan.io/v2/api?chainid=11155111 \
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-
-# Simulate hub deployment (no broadcast)
-deploy-hub-sepolia-sim:
-	@echo "Simulating Hub deployment to Ethereum Sepolia..."
-	forge script script/DeployHub.s.sol:DeployHub \
-		--rpc-url $(ETH_RPC_URL) \
-		--account $(ETH_KEYSTORE_ACCOUNT) \
-		--simulate \
-		-vvvv
 
 # Deploy to local anvil for testing
 deploy-hub-anvil:
@@ -109,16 +65,17 @@ deploy-hub-anvil:
 # ============================================
 
 # Deploy spoke contracts to Base Sepolia
-# Requires HUB_GATEWAY_ADDRESS to be set (from hub deployment)
+# Script automatically detects chain from RPC URL
 deploy-spoke-base-sepolia:
 	@echo "Deploying Spoke contracts to Base Sepolia..."
-	forge script script/DeploySpokes.s.sol:DeploySpokes --sig "runBaseSepolia(address)" $(HUB_GATEWAY_ADDRESS) \
+	@echo "Hub Gateway Address: $(HUB_GATEWAY_ADDRESS)"
+	forge script script/DeploySpokes.s.sol:DeploySpokes --sig "run(address)" $(HUB_GATEWAY_ADDRESS) \
 		--rpc-url base_sepolia \
-		--account $(ETH_KEYSTORE_ACCOUNT) \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \
 		--verify \
 		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.basescan.org/api \
+		--verifier-url https://api.etherscan.io/v2/api?chainid=84532 \
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
@@ -126,57 +83,37 @@ deploy-spoke-base-sepolia:
 # Deploy spoke contracts to Arbitrum Sepolia
 deploy-spoke-arb-sepolia:
 	@echo "Deploying Spoke contracts to Arbitrum Sepolia..."
-	forge script script/DeploySpokes.s.sol:DeploySpokes --sig "runArbitrumSepolia(address)" $(HUB_GATEWAY_ADDRESS) \
+	@echo "Hub Gateway Address: $(HUB_GATEWAY_ADDRESS)"
+	forge script script/DeploySpokes.s.sol:DeploySpokes --sig "run(address)" $(HUB_GATEWAY_ADDRESS) \
 		--rpc-url arbitrum_sepolia \
-		--account $(ETH_KEYSTORE_ACCOUNT) \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \
 		--verify \
-		--etherscan-api-key $(ARBISCAN_API_KEY) \
-		--verifier-url https://api-sepolia.arbiscan.io/api \
+		--etherscan-api-key $(ETHERSCAN_API_KEY) \
+		--verifier-url https://api.etherscan.io/v2/api?chainid=421614 \
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
+
+# Deploy all spokes (after hub deployment)
+deploy-spokes: deploy-spoke-base-sepolia deploy-spoke-arb-sepolia
+	@echo "Spoke deployments complete!"
 
 # ============================================
 # VERIFICATION
 # ============================================
 
-verify-hub:
+# Verify hub contracts on Etherscan
+verify-hub-sepolia:
 	@echo "Verifying Hub contracts on Etherscan..."
-	forge verify-contract <WHITELIST_ADDRESS> src/access/Whitelist.sol:Whitelist \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <GLOBAL_MARGIN_VAULT_ADDRESS> src/margin/GlobalMarginVault.sol:GlobalMarginVault \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <RISK_ENGINE_ADDRESS> src/margin/RiskEngine.sol:RiskEngine \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <YIELD_CURVE_ORACLE_ADDRESS> src/oracles/YieldCurveOracle.sol:YieldCurveOracle \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <IRS_INSTRUMENT_ADDRESS> src/core/IRSInstrument.sol:IRSInstrument \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <CLEARING_HOUSE_ADDRESS> src/core/ClearingHouse.sol:ClearingHouse \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <INSURANCE_FUND_ADDRESS> src/insurance/InsuranceFund.sol:InsuranceFund \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-	forge verify-contract <LIQUIDATION_ENGINE_ADDRESS> src/liquidation/LiquidationEngine.sol:LiquidationEngine \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.etherscan.io/api
-
-verify-spoke:
-	@echo "Verifying Spoke contracts..."
-	@echo "Note: Replace addresses with actual deployed contract addresses"
-	forge verify-contract <LOCAL_MARGIN_VAULT_ADDRESS> src/margin/LocalMarginVault.sol:LocalMarginVault \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.basescan.org/api
-	forge verify-contract <CCIP_SPOKE_GATEWAY_ADDRESS> src/crosschain/CCIPSpokeGateway.sol:CCIPSpokeGateway \
-		--etherscan-api-key $(ETHERSCAN_API_KEY) \
-		--verifier-url https://api-sepolia.basescan.org/api
+	forge verify-contract 0x618Cb68e0770eCAD5c8151e82be7bacaa64a27eb src/access/Whitelist.sol:Whitelist --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0x90c6ca51091fd0e090902aa20bc842392261363b src/margin/GlobalMarginVault.sol:GlobalMarginVault --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0xa9155f695f72ecbce362d65f70ec0fbb2e59ba5b src/margin/RiskEngine.sol:RiskEngine --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0x1d9418e725ef47f113030a0e5e915d40fc4a6992 src/oracles/YieldCurveOracle.sol:YieldCurveOracle --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0xd7bee027a96f23caedbe0fa3a72f0068ad8be6f7 src/core/IRSInstrument.sol:IRSInstrument --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0x535257bbda42c20417a140041a924af53b2d78fc src/core/ClearingHouse.sol:ClearingHouse --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0x3137bbf18bae9766e8bc8737f66a876c877c4abd src/insurance/InsuranceFund.sol:InsuranceFund --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
+	forge verify-contract 0xaa910ba9edca900bfa3af3bcc4ff815e1127fd31 src/liquidation/LiquidationEngine.sol:LiquidationEngine --etherscan-api-key $(ETHERSCAN_API_KEY) --verifier-url https://api.etherscan.io/v2/api?chainid=11155111
 
 # ============================================
 # ABI EXTRACTION
