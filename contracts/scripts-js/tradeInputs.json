@@ -1,0 +1,42 @@
+{
+  "trade": {
+    "tradeId": "0xf8c16b3db588dc5a55d8553b8775bd131d878157b203dc032f56420b20b9791c",
+    "partyA": "0x6f39809e474d6669190c76f15171de07e6d5f89a440ecbe6e2e01dceaa9af451",
+    "partyB": "0x338fd19cdf3819f5db0fc391a6c8fc9a86ab83cd5d567513f94cc01cb427c190",
+    "notional": "1000000000000000000000000",
+    "fixedRateBps": 350,
+    "startDate": 1771842944,
+    "maturityDate": 1803378944,
+    "paymentInterval": 7776000,
+    "dayCountConvention": 0,
+    "floatingRateIndex": "0xc08d7a87ed14b50e2326878bceecda42cfb5c0ac695493788b450ac63da39744",
+    "nonce": 1,
+    "deadline": 1771929344
+  },
+  "sigA": "0xa5fcbec4f6f40793c4e4fd90e8cb5e03c79837f95c7d0be5fc18d177763afd2d5097e7f2bf5c9eeb6d7b20b237f6cb188e0c68a665bb5c714037d4b28141501b1b",
+  "sigB": "0x879519dd50ca03a2735e9fd610e4ce05e6516a3c75fc2fcb6fff6244ebc73f800c068d4f101ed85358df3cbc5593e321be0092fc4f8d3c376de811a5cc19b0551b",
+  "metadata": {
+    "description": "Generated trade inputs for ClearingHouse.submitMatchedTrade()",
+    "tradeId": "0xf8c16b3db588dc5a55d8553b8775bd131d878157b203dc032f56420b20b9791c",
+    "partyA": "0x6f39809e474d6669190c76f15171de07e6d5f89a440ecbe6e2e01dceaa9af451",
+    "partyB": "0x338fd19cdf3819f5db0fc391a6c8fc9a86ab83cd5d567513f94cc01cb427c190",
+    "notionalFormatted": "1000000.0 USDC",
+    "fixedRateFormatted": "3.50%",
+    "tenorDays": 365,
+    "paymentIntervalDays": 90,
+    "domain": {
+      "name": "ClearRate CCP",
+      "version": "1",
+      "chainId": 11155111,
+      "verifyingContract": "0x0000000000000000000000000000000000000001"
+    }
+  },
+  "solidityCall": {
+    "function": "submitMatchedTrade((bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes)",
+    "params": [
+      "(0xf8c16b3db588dc5a55d8553b8775bd131d878157b203dc032f56420b20b9791c,0x6f39809e474d6669190c76f15171de07e6d5f89a440ecbe6e2e01dceaa9af451,0x338fd19cdf3819f5db0fc391a6c8fc9a86ab83cd5d567513f94cc01cb427c190,1000000000000000000000000,350,1771842944,1803378944,7776000,0,0xc08d7a87ed14b50e2326878bceecda42cfb5c0ac695493788b450ac63da39744,1,1771929344)",
+      "0xa5fcbec4f6f40793c4e4fd90e8cb5e03c79837f95c7d0be5fc18d177763afd2d5097e7f2bf5c9eeb6d7b20b237f6cb188e0c68a665bb5c714037d4b28141501b1b",
+      "0x879519dd50ca03a2735e9fd610e4ce05e6516a3c75fc2fcb6fff6244ebc73f800c068d4f101ed85358df3cbc5593e321be0092fc4f8d3c376de811a5cc19b0551b"
+    ]
+  }
+}

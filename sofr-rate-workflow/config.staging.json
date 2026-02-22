@@ -1,7 +1,6 @@
 {
-  "schedule": "0 0 */6 * * *",
-  "sofrApiUrl": "https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json",
-  "sofrApiBackupUrl": "https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json",
+  "schedule": "0 */6 * * *",
+  "sofrApiUrl": "https://clear-rate.vercel.app/api/sofr",
   "evms": [
     {
       "yieldCurveOracleAddress": "0x6F893cE60e1F4302731d2F81bDd75470c04a941c",
