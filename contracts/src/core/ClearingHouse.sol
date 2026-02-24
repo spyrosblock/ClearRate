@@ -11,11 +11,13 @@ import {MarginVault} from "../margin/MarginVault.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
 import {Whitelist} from "../access/Whitelist.sol";
 import {YieldCurveOracle} from "../oracles/YieldCurveOracle.sol";
+import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 
 /// @title ClearingHouse
 /// @notice Central coordinator for IRS trade novation, VM settlement, and position compression.
 /// @dev Implements EIP-712 for gas-free matched trade submission and signature verification.
-contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
+///      Inherits from ReceiverTemplate to receive reports from Chainlink CRE workflow.
+contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTemplate {
     using ECDSA for bytes32;
 
     // ─── Constants ──────────────────────────────────────────────────────
@@ -142,6 +144,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
 
     /// @notice Deploy the ClearingHouse.
     /// @param admin The admin address.
+    /// @param forwarder The Chainlink Forwarder address for CRE reports.
     /// @param instrument_ The IRSInstrument (ERC-1155) contract.
     /// @param marginVault_ The MarginVault contract.
     /// @param riskEngine_ The RiskEngine contract.
@@ -149,12 +152,13 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
     /// @param oracle_ The YieldCurveOracle contract.
     constructor(
         address admin,
+        address forwarder,
         address instrument_,
         address marginVault_,
         address riskEngine_,
         address whitelist_,
         address oracle_
-    ) EIP712("ClearRate CCP", "1") {
+    ) EIP712("ClearRate CCP", "1") ReceiverTemplate(forwarder) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, admin);
         _grantRole(SETTLEMENT_ROLE, admin);
@@ -357,6 +361,70 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
         feeRecipient = recipient;
     }
 
+    // ─── ReceiverTemplate Implementation ─────────────────────────────────
+
+    /// @notice Process the report data from Chainlink CRE.
+    /// @dev Called by ReceiverTemplate.onReport() after validation.
+    ///      Decodes the trade submission data and calls submitMatchedTrade internally.
+    /// @param report ABI-encoded trade submission data:
+    ///      - trade: MatchedTrade struct
+    ///      - sigA: Signature from party A
+    ///      - sigB: Signature from party B
+    function _processReport(
+        bytes calldata report
+    ) internal override {
+        // Decode the report data: (MatchedTrade trade, bytes sigA, bytes sigB)
+        (MatchedTrade memory trade, bytes memory sigA, bytes memory sigB) = abi.decode(
+            report,
+            (MatchedTrade, bytes, bytes)
+        );
+
+        // Execute the trade submission (reverts if validation fails)
+        // Note: This bypasses the OPERATOR_ROLE check since it's called via CRE report
+        _validateTrade(trade);
+        _verifySignature(trade, trade.partyA, sigA);
+        _verifySignature(trade, trade.partyB, sigB);
+
+        // Whitelist Check
+        address ownerA = whitelist.getAccountOwner(trade.partyA);
+        address ownerB = whitelist.getAccountOwner(trade.partyB);
+        if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
+        if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
+
+        // Margin Check
+        uint256 tenor = trade.maturityDate - trade.startDate;
+        uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
+
+        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyA);
+        }
+        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyB);
+        }
+
+        // Mark trade as submitted
+        tradeSubmitted[trade.tradeId] = true;
+
+        emit TradeSubmitted(
+            trade.tradeId,
+            trade.partyA,
+            trade.partyB,
+            trade.notional,
+            trade.fixedRateBps
+        );
+
+        // Execute novation
+        _novate(trade, ownerA, ownerB, imRequired);
+    }
+
+    /// @inheritdoc AccessControl
+    /// @dev Overrides supportsInterface to include both AccessControl and ReceiverTemplate interfaces.
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControl, ReceiverTemplate) returns (bool) {
+        return AccessControl.supportsInterface(interfaceId) || ReceiverTemplate.supportsInterface(interfaceId);
+    }
+
     // ─── View Functions ─────────────────────────────────────────────────
 
     /// @notice Get the EIP-712 digest for a matched trade.
@@ -383,7 +451,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
     // ─── Internal Functions ─────────────────────────────────────────────
 
     /// @dev Validate trade parameters.
-    function _validateTrade(MatchedTrade calldata trade) internal view {
+    function _validateTrade(MatchedTrade memory trade) internal view {
         if (tradeSubmitted[trade.tradeId]) revert TradeAlreadySubmitted(trade.tradeId);
         if (block.timestamp > trade.deadline) revert SignatureExpired(trade.deadline);
         if (trade.notional == 0) revert InvalidNotional();
@@ -403,9 +471,9 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
 
     /// @dev Verify an EIP-712 signature against an accountId.
     function _verifySignature(
-        MatchedTrade calldata trade,
+        MatchedTrade memory trade,
         bytes32 accountId,
-        bytes calldata signature
+        bytes memory signature
     ) internal view {
         bytes32 digest = _hashTypedDataV4(_tradeStructHash(trade));
         address signer = digest.recover(signature);
@@ -414,7 +482,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
     }
 
     /// @dev Compute the EIP-712 struct hash for a MatchedTrade.
-    function _tradeStructHash(MatchedTrade calldata trade) internal pure returns (bytes32) {
+    function _tradeStructHash(MatchedTrade memory trade) internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
                 MATCHED_TRADE_TYPEHASH,
@@ -436,7 +504,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
 
     /// @dev Execute novation: mint ERC-1155 position tokens and lock IM.
     function _novate(
-        MatchedTrade calldata trade,
+        MatchedTrade memory trade,
         address ownerA,
         address ownerB,
         uint256 imRequired

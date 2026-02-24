@@ -39,133 +39,155 @@ function loadEnv() {
 
 const env = loadEnv();
 
-// ─── Configuration ─────────────────────────────────────────────────────
+// ─── Get Network Chain ID ─────────────────────────────────────────────
 
-// Domain separator for EIP-712 (using ethers' built-in TypedDataEncoder for correct hashing)
-const domain = {
-  name: "ClearRate CCP",
-  version: "1",
-  chainId: 11155111, // Sepolia
-  verifyingContract: env.CLEARINGHOUSE_ADDRESS || "0xe9f4409b7ff1F8B5D87f5DDB9BD75F0E6467Ba81"
-};
+async function getChainId() {
+  const provider = new ethers.JsonRpcProvider(
+    "https://eth-sepolia.g.alchemy.com/v2/" + env.ALCHEMY_API_KEY
+  );
+  const network = await provider.getNetwork();
+  // network.chainId is a BigInt, convert to number
+  return Number(network.chainId);
+}
 
-// MatchedTrade type definition for EIP-712
-const types = {
-  MatchedTrade: [
-    { name: "tradeId", type: "bytes32" },
-    { name: "partyA", type: "bytes32" },
-    { name: "partyB", type: "bytes32" },
-    { name: "notional", type: "uint256" },
-    { name: "fixedRateBps", type: "uint256" },
-    { name: "startDate", type: "uint256" },
-    { name: "maturityDate", type: "uint256" },
-    { name: "paymentInterval", type: "uint256" },
-    { name: "dayCountConvention", type: "uint8" },
-    { name: "floatingRateIndex", type: "bytes32" },
-    { name: "nonce", type: "uint256" },
-    { name: "deadline", type: "uint256" }
-  ]
-};
+// ─── Main ─────────────────────────────────────────────────────────────
 
-// ─── Trade Parameters ────────────────────────────────────────────────
+async function main() {
+  // Get the actual chainId from the network
+  const chainId = await getChainId();
+  console.log("Using chainId:", chainId);
 
-// Generate unique trade ID
-const tradeId = ethers.keccak256(ethers.randomBytes(32));
+  // Domain separator for EIP-712 (using ethers' built-in TypedDataEncoder for correct hashing)
+  const domain = {
+    name: "ClearRate CCP",
+    version: "1",
+    chainId: chainId,
+    verifyingContract: env.CLEARING_HOUSE_ADDRESS
+  };
 
-// Account IDs (bytes32 format) - Must match exactly how Solidity stores them
-// WhitelistUsers.s.sol uses: bytes32(vm.envUint("USER1_ACCOUNT_ID"))
-// So we convert the numeric string to bytes32 directly, NOT keccak256
-const partyA = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER1_ACCOUNT_ID || "1")), 32);
-const partyB = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER2_ACCOUNT_ID || "2")), 32);
+  // MatchedTrade type definition for EIP-712
+  const types = {
+    MatchedTrade: [
+      { name: "tradeId", type: "bytes32" },
+      { name: "partyA", type: "bytes32" },
+      { name: "partyB", type: "bytes32" },
+      { name: "notional", type: "uint256" },
+      { name: "fixedRateBps", type: "uint256" },
+      { name: "startDate", type: "uint256" },
+      { name: "maturityDate", type: "uint256" },
+      { name: "paymentInterval", type: "uint256" },
+      { name: "dayCountConvention", type: "uint8" },
+      { name: "floatingRateIndex", type: "bytes32" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" }
+    ]
+  };
 
-// Trade terms
-const notional = ethers.parseEther("1000000"); // 1,000,000 USDC
-const fixedRateBps = 350; // 3.50% annual fixed rate
+  // ─── Trade Parameters ────────────────────────────────────────────────
 
-// Timestamps (using realistic dates)
-const startDate = Math.floor(Date.now() / 1000) + 86400; // Tomorrow
-const maturityDate = startDate + 365 * 24 * 60 * 60; // 1 year
+  // Generate unique trade ID
+  const tradeId = ethers.keccak256(ethers.randomBytes(32));
 
-// Payment every 3 months (90 days in seconds)
-const paymentInterval = 90 * 24 * 60 * 60;
+  // Account IDs (bytes32 format) - Must match exactly how Solidity stores them
+  // WhitelistUsers.s.sol uses: bytes32(vm.envUint("USER1_ACCOUNT_ID"))
+  // So we convert the numeric string to bytes32 directly, NOT keccak256
+  const partyA = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER1_ACCOUNT_ID || "1")), 32);
+  const partyB = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER2_ACCOUNT_ID || "2")), 32);
 
-// Day count convention: 0 = ACT/360, 1 = 30/360, etc.
-const dayCountConvention = 0; // ACT/360
+  // Trade terms
+  const notional = ethers.parseEther("1000000"); // 1,000,000 USDC
+  const fixedRateBps = 350; // 3.50% annual fixed rate
 
-// Floating rate index (SOFR)
-const floatingRateIndex = ethers.keccak256(ethers.toUtf8Bytes("SOFR"));
+  // Timestamps (using realistic dates)
+  const startDate = Math.floor(Date.now() / 1000) + 86400; // Tomorrow
+  const maturityDate = startDate + 365 * 24 * 60 * 60; // 1 year
 
-// Nonce for replay protection
-const nonce = 1;
+  // Payment every 3 months (90 days in seconds)
+  const paymentInterval = 90 * 24 * 60 * 60;
 
-// Deadline for signature validity (24 hours from startDate)
-const deadline = startDate + 24 * 60 * 60;
+  // Day count convention: 0 = ACT/360, 1 = 30/360, etc.
+  const dayCountConvention = 0; // ACT/360
 
-// ─── Build the Trade Struct ───────────────────────────────────────────
+  // Floating rate index (SOFR)
+  const floatingRateIndex = ethers.keccak256(ethers.toUtf8Bytes("SOFR"));
 
-const matchedTrade = {
-  tradeId,
-  partyA,
-  partyB,
-  notional: notional.toString(),
-  fixedRateBps,
-  startDate,
-  maturityDate,
-  paymentInterval,
-  dayCountConvention,
-  floatingRateIndex,
-  nonce,
-  deadline
-};
+  // Nonce for replay protection
+  const nonce = 1;
 
-// ─── Generate Signatures ─────────────────────────────────────────────
+  // Deadline for signature validity (24 hours from startDate)
+  const deadline = startDate + 24 * 60 * 60;
 
-// Private keys from .env file
-const privateKeyA = env.USER1_PRIVATE_KEY;
-const privateKeyB = env.USER2_PRIVATE_KEY;
+  // ─── Build the Trade Struct ───────────────────────────────────────────
 
-// Create wallets
-const walletA = new ethers.Wallet(privateKeyA);
-const walletB = new ethers.Wallet(privateKeyB);
+  const matchedTrade = {
+    tradeId,
+    partyA,
+    partyB,
+    notional: notional.toString(),
+    fixedRateBps,
+    startDate,
+    maturityDate,
+    paymentInterval,
+    dayCountConvention,
+    floatingRateIndex,
+    nonce,
+    deadline
+  };
 
-// Generate EIP-712 signatures using ethers' built-in TypedDataEncoder
-// This ensures exact compatibility with Solidity's EIP712 implementation
-const sigA = await walletA.signTypedData(domain, types, matchedTrade);
-const sigB = await walletB.signTypedData(domain, types, matchedTrade);
+  // ─── Generate Signatures ─────────────────────────────────────────────
 
-// ─── Output ───────────────────────────────────────────────────────────
+  // Private keys from .env file
+  const privateKeyA = env.USER1_PRIVATE_KEY;
+  const privateKeyB = env.USER2_PRIVATE_KEY;
 
-const output = {
-  // The MatchedTrade struct
-  trade: {
-    tradeId: matchedTrade.tradeId,
-    partyA: matchedTrade.partyA,
-    partyB: matchedTrade.partyB,
-    notional: matchedTrade.notional,
-    fixedRateBps: matchedTrade.fixedRateBps,
-    startDate: matchedTrade.startDate,
-    maturityDate: matchedTrade.maturityDate,
-    paymentInterval: matchedTrade.paymentInterval,
-    dayCountConvention: matchedTrade.dayCountConvention,
-    floatingRateIndex: matchedTrade.floatingRateIndex,
-    nonce: matchedTrade.nonce,
-    deadline: matchedTrade.deadline
-  },
-  
-  // EIP-712 signatures
-  sigA,
-  sigB,
-  
-  // Metadata
-  metadata: {
-    notionalFormatted: ethers.formatEther(matchedTrade.notional) + " USDC",
-    fixedRateFormatted: (matchedTrade.fixedRateBps / 100).toFixed(2) + "%",
-    tenorDays: Math.floor((matchedTrade.maturityDate - matchedTrade.startDate) / (24 * 60 * 60)),
-    paymentIntervalDays: Math.floor(matchedTrade.paymentInterval / (24 * 60 * 60)),
-    partyAFormatted: matchedTrade.partyA,
-    partyBFormatted: matchedTrade.partyB
-  }
-};
+  // Create wallets
+  const walletA = new ethers.Wallet(privateKeyA);
+  const walletB = new ethers.Wallet(privateKeyB);
 
-// Output only JSON
-console.log(JSON.stringify(output, null, 2));
+  // Generate EIP-712 signatures using ethers' built-in TypedDataEncoder
+  // This ensures exact compatibility with Solidity's EIP712 implementation
+  const sigA = await walletA.signTypedData(domain, types, matchedTrade);
+  const sigB = await walletB.signTypedData(domain, types, matchedTrade);
+
+  // ─── Output ───────────────────────────────────────────────────────────
+
+  const output = {
+    // The MatchedTrade struct
+    trade: {
+      tradeId: matchedTrade.tradeId,
+      partyA: matchedTrade.partyA,
+      partyB: matchedTrade.partyB,
+      notional: matchedTrade.notional,
+      fixedRateBps: matchedTrade.fixedRateBps,
+      startDate: matchedTrade.startDate,
+      maturityDate: matchedTrade.maturityDate,
+      paymentInterval: matchedTrade.paymentInterval,
+      dayCountConvention: matchedTrade.dayCountConvention,
+      floatingRateIndex: matchedTrade.floatingRateIndex,
+      nonce: matchedTrade.nonce,
+      deadline: matchedTrade.deadline
+    },
+    
+    // EIP-712 signatures
+    sigA,
+    sigB,
+    
+    // Metadata
+    metadata: {
+      notionalFormatted: ethers.formatEther(matchedTrade.notional) + " USDC",
+      fixedRateFormatted: (matchedTrade.fixedRateBps / 100).toFixed(2) + "%",
+      tenorDays: Math.floor((matchedTrade.maturityDate - matchedTrade.startDate) / (24 * 60 * 60)),
+      paymentIntervalDays: Math.floor(matchedTrade.paymentInterval / (24 * 60 * 60)),
+      partyAFormatted: matchedTrade.partyA,
+      partyBFormatted: matchedTrade.partyB
+    }
+  };
+
+  // Store the result in a trade.json file
+  const outputPath = path.join(__dirname, "trade.json");
+  fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+  console.log(`Trade inputs saved to ${outputPath}`);
+  console.log(JSON.stringify(output, null, 2));
+}
+
+main().catch(console.error);

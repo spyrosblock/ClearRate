@@ -106,6 +106,7 @@ contract Deploy is ClearRateScript {
         console.log("\n[6/8] Deploying ClearingHouse...");
         ClearingHouse clearingHouse = new ClearingHouse(
             deployer,
+            getChainlinkForwarder(),
             address(instrument),
             address(marginVault),
             address(riskEngine),

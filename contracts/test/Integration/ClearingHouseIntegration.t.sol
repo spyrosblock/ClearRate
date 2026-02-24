@@ -106,6 +106,7 @@ contract ClearingHouseIntegrationTest is Test {
         // Deploy ClearingHouse
         clearingHouse = new ClearingHouse(
             admin,
+            address(0), // Forwarder - use address(0) for testing (no CRE reports)
             address(instrument),
             address(marginVault),
             address(riskEngine),

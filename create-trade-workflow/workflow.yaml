@@ -7,7 +7,7 @@
 # ==========================================================================
 staging-settings:
   user-workflow:
-    workflow-name: "sofr-rate-fetcher-staging"
+    workflow-name: "create-trade-workflow"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
@@ -16,7 +16,7 @@ staging-settings:
 # ==========================================================================
 production-settings:
   user-workflow:
-    workflow-name: "sofr-rate-fetcher-production"
+    workflow-name: "create-trade-workflow-production"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.production.json"

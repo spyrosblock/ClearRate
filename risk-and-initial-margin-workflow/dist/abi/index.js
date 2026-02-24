@@ -1,1 +1,0 @@
-export { YieldCurveOracle } from './YieldCurveOracle';

@@ -1,0 +1,9 @@
+{
+  "evms": [
+    {
+      "clearingHouseAddress": "0x5BBA603E68fe524772CAD5673b57dfe774d1F4a4",
+      "chainSelectorName": "ethereum-mainnet",
+      "gasLimit": "500000"
+    }
+  ]
+}

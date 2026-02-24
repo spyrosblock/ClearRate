@@ -102,9 +102,11 @@ contract ClearingHouseTest is Test {
         // Deploy IRSInstrument
         instrument = new IRSInstrument(admin, "https://metadata.clearrate.io/{id}.json");
 
-        // Deploy ClearingHouse
+        // Deploy ClearingHouse with a mock forwarder address
+        address forwarder = makeAddr("forwarder");
         clearingHouse = new ClearingHouse(
             admin,
+            forwarder,
             address(instrument),
             address(marginVault),
             address(riskEngine),
@@ -1730,6 +1732,660 @@ contract ClearingHouseTest is Test {
         clearingHouse.settleMaturedPosition(tradeId1);
 
         assertFalse(clearingHouse.getPosition(tradeId1).active);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  _processReport (CRE Report Processing via onReport)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// @notice Helper to encode metadata for onReport (workflowId, workflowName, workflowOwner)
+    function _encodeMetadata(
+        bytes32 workflowId,
+        bytes10 workflowName,
+        address workflowOwner
+    ) internal pure returns (bytes memory) {
+        return abi.encodePacked(workflowId, workflowName, workflowOwner);
+    }
+
+    /// @notice Helper to encode the report data for _processReport
+    function _encodeReport(
+        ClearingHouse.MatchedTrade memory trade,
+        bytes memory sigA,
+        bytes memory sigB
+    ) internal pure returns (bytes memory) {
+        return abi.encode(trade, sigA, sigB);
+    }
+
+    function test_processReport_viaOnReport_success() public {
+        // Deploy a new ClearingHouse with a forwarder address (not address(0))
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        // Grant roles to the new clearing house
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        // Call onReport from the forwarder - should succeed
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        assertTrue(chWithForwarder.tradeSubmitted(tradeId));
+        assertEq(chWithForwarder.activePositionCount(), 1);
+    }
+
+    /// @notice Sign a trade for a specific ClearingHouse address (for EIP-712 domain separator)
+    function _signTradeWithCH(
+        ClearingHouse.MatchedTrade memory trade,
+        Vm.Wallet memory wallet,
+        ClearingHouse ch
+    ) internal returns (bytes memory) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                ch.MATCHED_TRADE_TYPEHASH(),
+                trade.tradeId, trade.partyA, trade.partyB,
+                trade.notional, trade.fixedRateBps,
+                trade.startDate, trade.maturityDate, trade.paymentInterval,
+                trade.dayCountConvention, trade.floatingRateIndex,
+                trade.nonce, trade.deadline
+            )
+        );
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("ClearRate CCP"),
+                keccak256("1"),
+                block.chainid,
+                address(ch)
+            )
+        );
+        bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wallet, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function test_processReport_revertsIfCallerIsNotForwarder() public {
+        address forwarder = makeAddr("forwarder");
+        address attacker = makeAddr("attacker");
+
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        // Attacker tries to call onReport - should revert with InvalidSender
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSignature("InvalidSender(address,address)", attacker, forwarder));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_revertsIfInvalidSignature() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        
+        // Sign with wrong wallet (bob signs for alice)
+        bytes memory sigA = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(ClearingHouse.InvalidSignature.selector, ALICE_ACCOUNT));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_revertsIfTradeAlreadySubmitted() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        // First call succeeds
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        // Second call with same tradeId should revert
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(ClearingHouse.TradeAlreadySubmitted.selector, tradeId));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_revertsIfPartyNotWhitelisted() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        // Remove Alice from whitelist
+        whitelist.removeParticipant(alice);
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(ClearingHouse.InvalidSignature.selector, ALICE_ACCOUNT));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_revertsIfInsufficientMargin() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        // Very high notional that exceeds margin
+        trade.notional = 100_000_000_000e6;
+        
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(ClearingHouse.InsufficientMarginForTrade.selector, ALICE_ACCOUNT));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_revertsIfExpiredDeadline() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        trade.deadline = block.timestamp - 1;
+        
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(ClearingHouse.SignatureExpired.selector, trade.deadline));
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_withExpectedWorkflowId() public {
+        address forwarder = makeAddr("forwarder");
+        bytes32 expectedWorkflowId = bytes32("EXPECTED_WF_ID");
+        
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        // Set expected workflow ID (test contract is owner since it deployed CH)
+        chWithForwarder.setExpectedWorkflowId(expectedWorkflowId);
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        // Correct workflow ID - should succeed
+        bytes memory metadata = _encodeMetadata(expectedWorkflowId, bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        assertTrue(chWithForwarder.tradeSubmitted(tradeId));
+    }
+
+    function test_processReport_revertsIfWrongWorkflowId() public {
+        address forwarder = makeAddr("forwarder");
+        bytes32 expectedWorkflowId = bytes32("EXPECTED_WF_ID");
+        
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        // Set expected workflow ID (test contract is owner since it deployed CH)
+        chWithForwarder.setExpectedWorkflowId(expectedWorkflowId);
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        // Wrong workflow ID - should revert
+        bytes memory metadata = _encodeMetadata(bytes32("WRONG_WF_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(); // InvalidWorkflowId error
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_withExpectedAuthor() public {
+        address forwarder = makeAddr("forwarder");
+        address expectedAuthor = makeAddr("expectedAuthor");
+        
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        // Set expected author (test contract is owner since it deployed CH)
+        chWithForwarder.setExpectedAuthor(expectedAuthor);
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        // Correct author - should succeed
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), expectedAuthor);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        assertTrue(chWithForwarder.tradeSubmitted(tradeId));
+    }
+
+    function test_processReport_revertsIfWrongAuthor() public {
+        address forwarder = makeAddr("forwarder");
+        address expectedAuthor = makeAddr("expectedAuthor");
+        address wrongAuthor = makeAddr("wrongAuthor");
+        
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        // Set expected author (test contract is owner since it deployed CH)
+        chWithForwarder.setExpectedAuthor(expectedAuthor);
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        // Wrong author - should revert
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), wrongAuthor);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        vm.expectRevert(); // InvalidAuthor error
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_createsPositionWithCorrectTerms() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        // Verify position was created correctly
+        ClearingHouse.NovatedPosition memory pos = chWithForwarder.getPosition(tradeId);
+        assertEq(pos.tradeId, tradeId);
+        assertEq(pos.partyA, ALICE_ACCOUNT);
+        assertEq(pos.partyB, BOB_ACCOUNT);
+        assertEq(pos.notional, NOTIONAL);
+        assertEq(pos.fixedRateBps, FIXED_RATE_BPS);
+        assertTrue(pos.active);
+        assertEq(pos.lastNpv, 0);
+    }
+
+    function test_processReport_locksInitialMarginForBothParties() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        uint256 aliceFreeBefore = marginVault.getFreeMargin(ALICE_ACCOUNT);
+        uint256 bobFreeBefore = marginVault.getFreeMargin(BOB_ACCOUNT);
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        uint256 im = _expectedIM();
+        assertEq(marginVault.getFreeMargin(ALICE_ACCOUNT), aliceFreeBefore - im);
+        assertEq(marginVault.getFreeMargin(BOB_ACCOUNT), bobFreeBefore - im);
+        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), im);
+        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), im);
+    }
+
+    function test_processReport_mintsERC1155Tokens() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        ClearingHouse.NovatedPosition memory pos = chWithForwarder.getPosition(tradeId);
+        assertEq(instrument.balanceOf(alice, pos.tokenIdA), NOTIONAL);
+        assertEq(instrument.balanceOf(bob, pos.tokenIdB), NOTIONAL);
+    }
+
+    function test_processReport_emitsTradeSubmittedEvent() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.expectEmit(true, true, true, true, address(chWithForwarder));
+        emit TradeSubmitted(tradeId, ALICE_ACCOUNT, BOB_ACCOUNT, NOTIONAL, FIXED_RATE_BPS);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_emitsTradeNovatedEvent() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.expectEmit(true, false, false, false, address(chWithForwarder));
+        emit TradeNovated(tradeId, 0, 1);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+    }
+
+    function test_processReport_consumesNonces() public {
+        address forwarder = makeAddr("forwarder");
+        ClearingHouse chWithForwarder = new ClearingHouse(
+            admin,
+            forwarder,
+            address(instrument),
+            address(marginVault),
+            address(riskEngine),
+            address(whitelist),
+            address(oracle)
+        );
+
+        vm.startPrank(admin);
+        instrument.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        marginVault.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(chWithForwarder));
+        vm.stopPrank();
+
+        bytes32 tradeId = keccak256("CRE_TRADE_1");
+        ClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
+        bytes memory sigA = _signTradeWithCH(trade, aliceWallet, chWithForwarder);
+        bytes memory sigB = _signTradeWithCH(trade, bobWallet, chWithForwarder);
+
+        bytes memory metadata = _encodeMetadata(bytes32("WORKFLOW_ID"), bytes10("workflow"), forwarder);
+        bytes memory report = _encodeReport(trade, sigA, sigB);
+
+        vm.prank(forwarder);
+        chWithForwarder.onReport(metadata, report);
+
+        assertTrue(chWithForwarder.usedNonces(ALICE_ACCOUNT, 1));
+        assertTrue(chWithForwarder.usedNonces(BOB_ACCOUNT, 1));
     }
 
 }
