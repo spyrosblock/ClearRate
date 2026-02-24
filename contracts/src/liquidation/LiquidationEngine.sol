@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
-import {GlobalMarginVault} from "../margin/GlobalMarginVault.sol";
+import {MarginVault} from "../margin/MarginVault.sol";
 import {InsuranceFund} from "../insurance/InsuranceFund.sol";
 
 /// @title LiquidationEngine
@@ -36,8 +36,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
     /// @notice Reference to the RiskEngine.
     RiskEngine public immutable riskEngine;
 
-    /// @notice Reference to the GlobalMarginVault.
-    GlobalMarginVault public immutable marginVault;
+    /// @notice Reference to the MarginVault.
+    MarginVault public immutable marginVault;
 
     /// @notice Reference to the InsuranceFund.
     InsuranceFund public immutable insuranceFund;
@@ -83,7 +83,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
     /// @notice Deploy the LiquidationEngine.
     /// @param admin The admin address.
     /// @param riskEngine_ The RiskEngine contract address.
-    /// @param marginVault_ The GlobalMarginVault contract address.
+    /// @param marginVault_ The MarginVault contract address.
     /// @param insuranceFund_ The InsuranceFund contract address.
     /// @param auctionDuration_ Default auction duration in seconds.
     /// @param startPremium_ Default starting premium in BPS.
@@ -98,7 +98,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
 
         riskEngine = RiskEngine(riskEngine_);
-        marginVault = GlobalMarginVault(marginVault_);
+        marginVault = MarginVault(marginVault_);
         insuranceFund = InsuranceFund(insuranceFund_);
 
         if (auctionDuration_ == 0) revert InvalidDuration();
@@ -121,9 +121,14 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
         }
 
         // Calculate the debt (MM shortfall)
+        // Debt must consider locked IM which is not immediately available
         uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
+        uint256 lockedIM = riskEngine.accountInitialMargin(accountId);
         uint256 mm = riskEngine.accountMaintenanceMargin(accountId);
-        uint256 debt = mm > totalCollateral ? mm - totalCollateral : 0;
+        // Available collateral = totalCollateral - lockedIM
+        // Debt = MM - availableCollateral = MM - (totalCollateral - lockedIM)
+        uint256 availableCollateral = totalCollateral > lockedIM ? totalCollateral - lockedIM : 0;
+        uint256 debt = mm > availableCollateral ? mm - availableCollateral : 0;
 
         auctions[accountId] = Auction({
             accountId: accountId,

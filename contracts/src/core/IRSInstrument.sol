@@ -12,6 +12,12 @@ contract IRSInstrument is ERC1155, AccessControl {
     // ─── Roles ──────────────────────────────────────────────────────────
     bytes32 public constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
 
+    // ─── Constants ──────────────────────────────────────────────────────
+
+    /// @notice Allowed floating rate indices.
+    bytes32 public constant SOFR_INDEX = keccak256("SOFR");
+    bytes32 public constant EUROSTR_INDEX = keccak256("EuroSTR");
+
     // ─── Enums ──────────────────────────────────────────────────────────
 
     /// @notice Direction of the swap leg from the holder's perspective.
@@ -60,6 +66,7 @@ contract IRSInstrument is ERC1155, AccessControl {
     error InvalidSwapTerms();
     error MaturityBeforeStart();
     error ZeroNotional();
+    error InvalidFloatingRateIndex();
 
     // ─── Constructor ────────────────────────────────────────────────────
 
@@ -158,5 +165,8 @@ contract IRSInstrument is ERC1155, AccessControl {
         if (terms.maturityDate <= terms.startDate) revert MaturityBeforeStart();
         if (terms.fixedRateBps == 0) revert InvalidSwapTerms();
         if (terms.paymentInterval == 0) revert InvalidSwapTerms();
+        if (terms.floatingRateIndex != SOFR_INDEX && terms.floatingRateIndex != EUROSTR_INDEX) {
+            revert InvalidFloatingRateIndex();
+        }
     }
 }

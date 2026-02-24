@@ -5,25 +5,26 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Whitelist} from "../access/Whitelist.sol";
 
-/// @title GlobalMarginVault
-/// @notice Hub-chain global margin ledger that tracks collateral per accountId.
+/// @title MarginVault
+/// @notice  margin ledger that tracks collateral per accountId.
 /// @dev Manages total collateral, locked initial margin, and free margin.
 ///      Stablecoins are valued at 1:1 with USD — no haircuts or price feeds needed.
-contract GlobalMarginVault is AccessControl, ReentrancyGuard {
+///      Access control: Only whitelisted participants can deposit/withdraw for their own accounts.
+///      Only the ClearingHouse can lock/release IM and settle variation margin.
+contract MarginVault is AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ─── Roles ──────────────────────────────────────────────────────────
     bytes32 public constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
-    bytes32 public constant MARGIN_OPERATOR_ROLE = keccak256("MARGIN_OPERATOR_ROLE");
 
     // ─── Structs ────────────────────────────────────────────────────────
 
     /// @notice Margin account state for a participant.
     struct MarginAccount {
-        uint256 totalCollateral;   // Total stablecoin collateral deposited (across all accepted tokens)
+        uint256 totalCollateral;   // Total stableCollateral deposited (across all accepted tokens)
         uint256 lockedIM;          // Collateral locked as Initial Margin
-        uint256 vmBalance;         // Variation Margin balance (can be positive or negative via int tracking)
         bool exists;               // Whether the account has been initialized
     }
 
@@ -44,6 +45,9 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     /// @notice List of accepted tokens for enumeration.
     address[] public tokenList;
 
+    /// @notice Reference to the Whitelist contract for access control.
+    Whitelist public whitelist;
+
     // ─── Events ─────────────────────────────────────────────────────────
     event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount);
     event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount);
@@ -60,16 +64,20 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     error TokenNotAccepted(address token);
     error ZeroAmount();
     error InvalidAddress();
+    error NotAuthorized(address caller, bytes32 accountId);
+    error WhitelistNotSet();
 
     // ─── Constructor ────────────────────────────────────────────────────
 
-    /// @notice Deploy the GlobalMarginVault.
+    /// @notice Deploy the MarginVault.
     /// @param admin The admin address.
+    /// @param whitelist_ The Whitelist contract address.
     /// @param initialTokens Initially accepted stablecoin addresses.
-    constructor(address admin, address[] memory initialTokens) {
+    constructor(address admin, address whitelist_, address[] memory initialTokens) {
         if (admin == address(0)) revert InvalidAddress();
+        if (whitelist_ == address(0)) revert InvalidAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(MARGIN_OPERATOR_ROLE, admin);
+        whitelist = Whitelist(whitelist_);
 
         for (uint256 i; i < initialTokens.length; ++i) {
             acceptedTokens[initialTokens[i]] = true;
@@ -81,14 +89,18 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     // ─── Margin Operations ──────────────────────────────────────────────
 
     /// @notice Deposit collateral into a margin account.
-    /// @param accountId The global account identifier.
+    /// @param accountId The account identifier.
     /// @param token The stablecoin token to deposit.
     /// @param amount The amount to deposit.
     function depositMargin(
         bytes32 accountId,
         address token,
         uint256 amount
-    ) external nonReentrant onlyRole(MARGIN_OPERATOR_ROLE) {
+    ) external nonReentrant {
+        // Access control: caller must be whitelisted and own the accountId
+        if (!whitelist.isWhitelisted(msg.sender)) revert NotAuthorized(msg.sender, accountId);
+        if (whitelist.getAccountId(msg.sender) != accountId) revert NotAuthorized(msg.sender, accountId);
+        
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
         if (amount == 0) revert ZeroAmount();
 
@@ -107,7 +119,7 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
 
     /// @notice Withdraw collateral from a margin account.
     /// @dev Can only withdraw from free margin (totalCollateral - lockedIM - vmDebit).
-    /// @param accountId The global account identifier.
+    /// @param accountId The account identifier.
     /// @param token The stablecoin token to withdraw.
     /// @param amount The amount to withdraw.
     /// @param to The address to send withdrawn funds to.
@@ -116,7 +128,11 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
         address token,
         uint256 amount,
         address to
-    ) external nonReentrant onlyRole(MARGIN_OPERATOR_ROLE) {
+    ) external nonReentrant {
+        // Access control: caller must be whitelisted and own the accountId
+        if (!whitelist.isWhitelisted(msg.sender)) revert NotAuthorized(msg.sender, accountId);
+        if (whitelist.getAccountId(msg.sender) != accountId) revert NotAuthorized(msg.sender, accountId);
+        
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert InvalidAddress();
 
@@ -143,7 +159,7 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     }
 
     /// @notice Lock initial margin for a new position.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param amount The amount to lock.
     function lockInitialMargin(
         bytes32 accountId,
@@ -164,7 +180,7 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     }
 
     /// @notice Release locked initial margin (e.g., on position compression or maturity).
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param amount The amount to release.
     function releaseInitialMargin(
         bytes32 accountId,
@@ -184,7 +200,7 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
 
     /// @notice Settle variation margin for an account.
     /// @dev Positive amount = credit (account gains), negative = debit (account loses).
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param amount Signed variation margin amount.
     function settleVariationMargin(
         bytes32 accountId,
@@ -223,33 +239,37 @@ contract GlobalMarginVault is AccessControl, ReentrancyGuard {
     // ─── View Functions ─────────────────────────────────────────────────
 
     /// @notice Get the free (withdrawable) margin for an account.
-    /// @param accountId The global account identifier.
+    /// @dev Free margin = totalCollateral - lockedIM.
+    ///      The variation margin is already incorporated into totalCollateral
+    ///      through the settleVariationMargin function.
+    /// @param accountId The account identifier.
     /// @return free The amount of free margin available.
     function getFreeMargin(bytes32 accountId) public view returns (uint256 free) {
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) return 0;
-
-        if (account.totalCollateral > account.lockedIM) {
+        MarginAccount memory account = marginAccounts[accountId];
+        if (account.totalCollateral >= account.lockedIM) {
             free = account.totalCollateral - account.lockedIM;
+        } else {
+            // If totalCollateral < lockedIM (e.g., after large VM debit), free is 0
+            free = 0;
         }
     }
 
     /// @notice Get the total collateral for an account.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @return The total collateral amount.
     function getTotalCollateral(bytes32 accountId) external view returns (uint256) {
         return marginAccounts[accountId].totalCollateral;
     }
 
     /// @notice Get the locked initial margin for an account.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @return The locked IM amount.
     function getLockedIM(bytes32 accountId) external view returns (uint256) {
         return marginAccounts[accountId].lockedIM;
     }
 
     /// @notice Check if an account exists.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @return True if the account has been initialized.
     function accountExists(bytes32 accountId) external view returns (bool) {
         return marginAccounts[accountId].exists;

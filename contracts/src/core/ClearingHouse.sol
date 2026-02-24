@@ -7,7 +7,7 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IRSInstrument} from "./IRSInstrument.sol";
 import {PositionMath} from "./PositionMath.sol";
-import {GlobalMarginVault} from "../margin/GlobalMarginVault.sol";
+import {MarginVault} from "../margin/MarginVault.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
 import {Whitelist} from "../access/Whitelist.sol";
 import {YieldCurveOracle} from "../oracles/YieldCurveOracle.sol";
@@ -52,7 +52,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
         uint256 tokenIdB;           // ERC-1155 token ID for party B's leg
         bytes32 partyA;
         bytes32 partyB;
-        uint256 notional;
+        uint256 notional;           // Current notional (may be reduced after compression)
+        uint256 originalNotional;   // Original notional at novation (for correct token burn)
         uint256 fixedRateBps;
         uint256 startDate;
         uint256 maturityDate;
@@ -70,7 +71,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
 
     /// @notice Core protocol dependencies.
     IRSInstrument public immutable instrument;
-    GlobalMarginVault public immutable marginVault;
+    MarginVault public immutable marginVault;
     RiskEngine public immutable riskEngine;
     Whitelist public immutable whitelist;
     YieldCurveOracle public immutable oracle;
@@ -142,7 +143,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
     /// @notice Deploy the ClearingHouse.
     /// @param admin The admin address.
     /// @param instrument_ The IRSInstrument (ERC-1155) contract.
-    /// @param marginVault_ The GlobalMarginVault contract.
+    /// @param marginVault_ The MarginVault contract.
     /// @param riskEngine_ The RiskEngine contract.
     /// @param whitelist_ The Whitelist contract.
     /// @param oracle_ The YieldCurveOracle contract.
@@ -159,7 +160,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
         _grantRole(SETTLEMENT_ROLE, admin);
 
         instrument = IRSInstrument(instrument_);
-        marginVault = GlobalMarginVault(marginVault_);
+        marginVault = MarginVault(marginVault_);
         riskEngine = RiskEngine(riskEngine_);
         whitelist = Whitelist(whitelist_);
         oracle = YieldCurveOracle(oracle_);
@@ -288,9 +289,15 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
         posA.notional -= compressionAmount;
         posB.notional -= compressionAmount;
 
-        // Deactivate fully compressed positions
-        if (posA.notional == 0) posA.active = false;
-        if (posB.notional == 0) posB.active = false;
+        // Deactivate fully compressed positions and update counter
+        if (posA.notional == 0) {
+            posA.active = false;
+            --activePositionCount;
+        }
+        if (posB.notional == 0) {
+            posB.active = false;
+            --activePositionCount;
+        }
 
         // Release IM proportionally
         uint256 tenor = posA.maturityDate - posA.startDate;
@@ -321,15 +328,15 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
         marginVault.releaseInitialMargin(pos.partyA, imRelease);
         marginVault.releaseInitialMargin(pos.partyB, imRelease);
 
-        // Burn position tokens
+        // Burn position tokens using originalNotional (tokens were minted with original amount)
         address ownerA = whitelist.getAccountOwner(pos.partyA);
         address ownerB = whitelist.getAccountOwner(pos.partyB);
 
         if (instrument.balanceOf(ownerA, pos.tokenIdA) > 0) {
-            instrument.burnPosition(ownerA, pos.tokenIdA, pos.notional);
+            instrument.burnPosition(ownerA, pos.tokenIdA, pos.originalNotional);
         }
         if (instrument.balanceOf(ownerB, pos.tokenIdB) > 0) {
-            instrument.burnPosition(ownerB, pos.tokenIdB, pos.notional);
+            instrument.burnPosition(ownerB, pos.tokenIdB, pos.originalNotional);
         }
 
         emit PositionMatured(tradeId, block.timestamp);
@@ -476,6 +483,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712 {
             partyA: trade.partyA,
             partyB: trade.partyB,
             notional: trade.notional,
+            originalNotional: trade.notional,
             fixedRateBps: trade.fixedRateBps,
             startDate: trade.startDate,
             maturityDate: trade.maturityDate,

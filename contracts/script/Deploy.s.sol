@@ -2,9 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {ClearRateScript} from "./Script.sol";
+import {ClearRateScript} from "./ClearRateScript.sol";
 import {Whitelist} from "../src/access/Whitelist.sol";
-import {GlobalMarginVault} from "../src/margin/GlobalMarginVault.sol";
+import {MarginVault} from "../src/margin/MarginVault.sol";
 import {RiskEngine} from "../src/margin/RiskEngine.sol";
 import {YieldCurveOracle} from "../src/oracles/YieldCurveOracle.sol";
 import {IRSInstrument} from "../src/core/IRSInstrument.sol";
@@ -12,25 +12,24 @@ import {ClearingHouse} from "../src/core/ClearingHouse.sol";
 import {InsuranceFund} from "../src/insurance/InsuranceFund.sol";
 import {LiquidationEngine} from "../src/liquidation/LiquidationEngine.sol";
 
-/// @title DeployHub
-/// @notice Deployment script for the Hub chain (Ethereum Sepolia) contracts.
-/// @dev Run with: forge script script/DeployHub.s.sol --rpc-url sepolia --broadcast --verify
+/// @title Deploy
+/// @notice Deployment script for the ClearRate protocol on Ethereum Sepolia.
+/// @dev Run with: forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --verify
 ///
 /// Deployment order:
 /// 1. Whitelist - KYC/governance-controlled address registry
-/// 2. GlobalMarginVault - Hub-chain margin ledger
+/// 2. MarginVault - Margin ledger
 /// 3. RiskEngine - IM/MM validation
 /// 4. YieldCurveOracle - Discount factor oracle
 /// 5. IRSInstrument - ERC-1155 position tokens
 /// 6. ClearingHouse - Trade novation and coordination
 /// 7. InsuranceFund - Backstop capital
 /// 8. LiquidationEngine - Dutch auction liquidations
-contract DeployHub is ClearRateScript {
+contract Deploy is ClearRateScript {
     // ─── Role Constants ─────────────────────────────────────────────────
     bytes32 internal constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
-    bytes32 internal constant MARGIN_OPERATOR_ROLE = keccak256("MARGIN_OPERATOR_ROLE");
     bytes32 internal constant RISK_ADMIN_ROLE = keccak256("RISK_ADMIN_ROLE");
     bytes32 internal constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
     bytes32 internal constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
@@ -52,12 +51,12 @@ contract DeployHub is ClearRateScript {
         address deployer = getDeployer();
 
         console.log("========================================");
-        console.log("ClearRate Hub Deployment (Ethereum Sepolia)");
+        console.log("ClearRate Protocol Deployment (Ethereum Sepolia)");
         console.log("========================================");
         console.log("Deployer:");
         console.logAddress(deployer);
 
-        address[] memory tokens = getHubTokens();
+        address[] memory tokens = getAcceptedTokens();
         uint256[] memory tenors = new uint256[](defaultTenors.length);
         for (uint256 i; i < defaultTenors.length; ++i) {
             tenors[i] = defaultTenors[i];
@@ -71,10 +70,10 @@ contract DeployHub is ClearRateScript {
         Whitelist whitelist = new Whitelist(deployer);
         logDeployment("Whitelist", address(whitelist));
 
-        // 2. Deploy GlobalMarginVault
-        console.log("\n[2/8] Deploying GlobalMarginVault...");
-        GlobalMarginVault marginVault = new GlobalMarginVault(deployer, tokens);
-        logDeployment("GlobalMarginVault", address(marginVault));
+        // 2. Deploy MarginVault
+        console.log("\n[2/8] Deploying MarginVault...");
+        MarginVault marginVault = new MarginVault(deployer, address(whitelist), tokens);
+        logDeployment("MarginVault", address(marginVault));
 
         // 3. Deploy RiskEngine
         console.log("\n[3/8] Deploying RiskEngine...");
@@ -140,10 +139,9 @@ contract DeployHub is ClearRateScript {
         console.log("Configuring Roles & Permissions...");
         console.log("========================================\n");
 
-        // Grant ClearingHouse roles to GlobalMarginVault
+        // Grant ClearingHouse roles to MarginVault
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
-        marginVault.grantRole(MARGIN_OPERATOR_ROLE, deployer);
-        console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on GlobalMarginVault");
+        console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on MarginVault");
 
         // Grant roles to IRSInstrument
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
@@ -183,7 +181,7 @@ contract DeployHub is ClearRateScript {
 
         names[0] = "Whitelist";
         addrs[0] = address(whitelist);
-        names[1] = "GlobalMarginVault";
+        names[1] = "MarginVault";
         addrs[1] = address(marginVault);
         names[2] = "RiskEngine";
         addrs[2] = address(riskEngine);
@@ -200,7 +198,7 @@ contract DeployHub is ClearRateScript {
 
         logAllDeployments(names, addrs);
 
-        console.log("Hub deployment complete!");
+        console.log("Protocol deployment complete!");
     }
 
     function _setDefaultRiskWeights(RiskEngine riskEngine) internal {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {GlobalMarginVault} from "./GlobalMarginVault.sol";
+import {MarginVault} from "./MarginVault.sol";
 import {PositionMath} from "../core/PositionMath.sol";
 
 /// @title RiskEngine
@@ -19,8 +19,8 @@ contract RiskEngine is AccessControl {
 
     // ─── State ──────────────────────────────────────────────────────────
 
-    /// @notice Reference to the GlobalMarginVault.
-    GlobalMarginVault public immutable marginVault;
+    /// @notice Reference to the MarginVault.
+    MarginVault public immutable marginVault;
 
     /// @notice Risk weight in BPS per tenor bucket (seconds → bps).
     /// @dev E.g., 1 year = 31536000 seconds → 200 bps (2%) risk weight.
@@ -32,18 +32,18 @@ contract RiskEngine is AccessControl {
     /// @notice Maintenance margin as a fraction of IM in BPS (e.g. 7500 = 75% of IM).
     uint256 public maintenanceMarginRatioBps;
 
+    /// @notice Per-account initial margin requirement (set by offchain compute or admin).
+    mapping(bytes32 => uint256) public accountInitialMargin;
+
     /// @notice Per-account maintenance margin requirement (set by offchain compute or admin).
     mapping(bytes32 => uint256) public accountMaintenanceMargin;
-
-    /// @notice Per-account initial margin requirement (aggregated across positions).
-    mapping(bytes32 => uint256) public accountInitialMargin;
 
     // ─── Events ─────────────────────────────────────────────────────────
     event RiskWeightUpdated(uint256 indexed tenor, uint256 oldWeight, uint256 newWeight);
     event ConfidenceUpdated(uint256 oldConfidence, uint256 newConfidence);
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
-    event AccountIMUpdated(bytes32 indexed accountId, uint256 newIM);
-    event AccountMMUpdated(bytes32 indexed accountId, uint256 newMM);
+    event AccountIMUpdated(bytes32 indexed accountId, uint256 oldIM, uint256 newIM);
+    event AccountMMUpdated(bytes32 indexed accountId, uint256 oldMM, uint256 newMM);
 
     // ─── Errors ─────────────────────────────────────────────────────────
     error InsufficientInitialMargin(bytes32 accountId, uint256 required, uint256 available);
@@ -57,7 +57,7 @@ contract RiskEngine is AccessControl {
 
     /// @notice Deploy the RiskEngine.
     /// @param admin The admin address.
-    /// @param vault The GlobalMarginVault address.
+    /// @param vault The MarginVault address.
     /// @param initialConfidenceBps Initial confidence multiplier in BPS.
     /// @param initialMMRatioBps Initial maintenance margin ratio in BPS.
     constructor(
@@ -69,7 +69,7 @@ contract RiskEngine is AccessControl {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(RISK_ADMIN_ROLE, admin);
 
-        marginVault = GlobalMarginVault(vault);
+        marginVault = MarginVault(vault);
 
         if (initialConfidenceBps == 0 || initialConfidenceBps > BPS) revert InvalidConfidence();
         if (initialMMRatioBps == 0 || initialMMRatioBps > BPS) revert InvalidMMRatio();
@@ -134,7 +134,7 @@ contract RiskEngine is AccessControl {
     // ─── Validation ─────────────────────────────────────────────────────
 
     /// @notice Check if an account has sufficient collateral to meet IM for a new trade.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param additionalIM The IM required for the new trade.
     /// @return True if the account passes the IM check.
     function checkIM(
@@ -146,7 +146,7 @@ contract RiskEngine is AccessControl {
     }
 
     /// @notice Check if an account meets its maintenance margin requirement.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @return True if the account passes the MM check.
     function checkMM(bytes32 accountId) external view returns (bool) {
         uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
@@ -155,7 +155,7 @@ contract RiskEngine is AccessControl {
     }
 
     /// @notice Check if an account is eligible for liquidation.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @return True if the account's collateral is below maintenance margin.
     function isLiquidatable(bytes32 accountId) external view returns (bool) {
         uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
@@ -166,24 +166,26 @@ contract RiskEngine is AccessControl {
     // ─── Account Margin Updates ─────────────────────────────────────────
 
     /// @notice Update the aggregate IM for an account (called after trade/compression).
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param newIM The new total IM requirement.
     function updateAccountIM(
         bytes32 accountId,
         uint256 newIM
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
+        uint256 oldIM = accountInitialMargin[accountId];
         accountInitialMargin[accountId] = newIM;
-        emit AccountIMUpdated(accountId, newIM);
+        emit AccountIMUpdated(accountId, oldIM, newIM);
     }
 
     /// @notice Update the maintenance margin for an account.
-    /// @param accountId The global account identifier.
+    /// @param accountId The  account identifier.
     /// @param newMM The new maintenance margin requirement.
     function updateMaintenanceMargin(
         bytes32 accountId,
         uint256 newMM
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
+        uint256 oldMM = accountMaintenanceMargin[accountId];
         accountMaintenanceMargin[accountId] = newMM;
-        emit AccountMMUpdated(accountId, newMM);
+        emit AccountMMUpdated(accountId, oldMM, newMM);
     }
 }

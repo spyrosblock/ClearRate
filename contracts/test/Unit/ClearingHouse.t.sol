@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {ClearingHouse} from "../../src/core/ClearingHouse.sol";
 import {IRSInstrument} from "../../src/core/IRSInstrument.sol";
-import {GlobalMarginVault} from "../../src/margin/GlobalMarginVault.sol";
+import {MarginVault} from "../../src/margin/MarginVault.sol";
 import {RiskEngine} from "../../src/margin/RiskEngine.sol";
 import {Whitelist} from "../../src/access/Whitelist.sol";
 import {YieldCurveOracle} from "../../src/oracles/YieldCurveOracle.sol";
@@ -20,7 +20,7 @@ contract ClearingHouseTest is Test {
     // ─── Contracts ──────────────────────────────────────────────────────
     ClearingHouse internal clearingHouse;
     IRSInstrument internal instrument;
-    GlobalMarginVault internal marginVault;
+    MarginVault internal marginVault;
     RiskEngine internal riskEngine;
     Whitelist internal whitelist;
     YieldCurveOracle internal oracle;
@@ -52,7 +52,6 @@ contract ClearingHouseTest is Test {
     bytes32 internal constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
-    bytes32 internal constant MARGIN_OPERATOR_ROLE = keccak256("MARGIN_OPERATOR_ROLE");
 
     // ─── Events (re-declared for expectEmit) ────────────────────────────
     event TradeSubmitted(
@@ -87,10 +86,10 @@ contract ClearingHouseTest is Test {
         whitelist.addParticipant(bob, BOB_ACCOUNT);
         vm.stopPrank();
 
-        // Deploy GlobalMarginVault with USDC
+        // Deploy MarginVault with USDC
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
-        marginVault = new GlobalMarginVault(admin, tokens);
+        marginVault = new MarginVault(admin, address(whitelist), tokens);
 
         // Deploy RiskEngine: 99% confidence, 75% MM ratio
         riskEngine = new RiskEngine(admin, address(marginVault), 9900, 7500);
@@ -135,9 +134,12 @@ contract ClearingHouseTest is Test {
     // ─── Helpers ────────────────────────────────────────────────────────
 
     function _fundMarginAccount(bytes32 accountId, uint256 amount) internal {
-        vm.startPrank(admin);
-        marginVault.grantRole(MARGIN_OPERATOR_ROLE, admin);
-        usdc.mint(admin, amount);
+        // Get the account owner from whitelist
+        address accountOwner = whitelist.getAccountOwner(accountId);
+        require(accountOwner != address(0), "Account not whitelisted");
+        
+        vm.startPrank(accountOwner);
+        usdc.mint(accountOwner, amount);
         usdc.approve(address(marginVault), amount);
         marginVault.depositMargin(accountId, address(usdc), amount);
         vm.stopPrank();
@@ -1506,13 +1508,13 @@ contract ClearingHouseTest is Test {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  Compression — activePositionCount Not Decremented (Bug Documentation)
+    //  Compression — activePositionCount Decremented on Full Compression
     // ═══════════════════════════════════════════════════════════════════
 
-    /// @notice Documents that compressPositions does NOT decrement activePositionCount
-    ///         even when positions are fully deactivated. This is a potential accounting
-    ///         bug — the counter drifts from the actual number of active positions.
-    function test_compressPositions_fullCompression_doesNotDecrementActivePositionCount() public {
+    /// @notice Verifies that compressPositions properly decrements activePositionCount
+    ///         when positions are fully deactivated. This ensures the counter stays
+    ///         in sync with the actual number of active positions.
+    function test_compressPositions_fullCompression_decrementsActivePositionCount() public {
         bytes32 tradeId1 = keccak256("TRADE_1");
         bytes32 tradeId2 = keccak256("TRADE_2");
 
@@ -1524,14 +1526,12 @@ contract ClearingHouseTest is Test {
         vm.prank(operator);
         clearingHouse.compressPositions(tradeId1, tradeId2);
 
-        // Both positions are deactivated...
+        // Both positions are deactivated
         assertFalse(clearingHouse.getPosition(tradeId1).active);
         assertFalse(clearingHouse.getPosition(tradeId2).active);
 
-        // ...but activePositionCount still reads 2 (not decremented during compression)
-        // NOTE: This is a known accounting discrepancy — settleMaturedPosition decrements
-        //       the counter, but compressPositions does not.
-        assertEq(clearingHouse.activePositionCount(), 2);
+        // activePositionCount is properly decremented to 0
+        assertEq(clearingHouse.activePositionCount(), 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1563,11 +1563,9 @@ contract ClearingHouseTest is Test {
         pos1 = clearingHouse.getPosition(tradeId1);
         assertFalse(pos1.active);
 
-        // Tokens for the residual amount are burned — but the original was minted
-        // at NOTIONAL, and burnPosition uses pos.notional (400K). The remaining 600K
-        // was never separately burned during compression (no token burn in compressPositions).
-        // This means alice still holds 600K of tokenIdA after maturity settlement.
-        assertEq(instrument.balanceOf(alice, pos1.tokenIdA), NOTIONAL - 400_000e6);
+        // Tokens are burned using originalNotional (1M), so all tokens are burned
+        // regardless of the reduced notional after partial compression
+        assertEq(instrument.balanceOf(alice, pos1.tokenIdA), 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -13,52 +13,29 @@ abstract contract ClearRateScript is Script {
     /// @dev From CONTINUE.md: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
     address internal constant SEPOLIA_USDC = address(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238);
 
-    /// @notice Base Sepolia USDC token address.
-    /// @dev From CONTINUE.md: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
-    address internal constant BASE_SEPOLIA_USDC = address(0x036CbD53842c5426634e7929541eC2318f3dCF7e);
-
-    /// @notice Arbitrum Sepolia USDC token address.
-    /// @dev From CONTINUE.md: 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d
-    address internal constant ARB_SEPOLIA_USDC = address(0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d);
-
-    /// @notice Default accepted tokens array for hub margin vaults.
+    /// @notice Default accepted tokens array for margin vaults.
     address[] internal acceptedTokens;
 
     /// @notice Default tenors for yield curve oracle (in seconds).
     uint256[] internal defaultTenors;
 
-    /// @notice CCIP chain selectors for testnet.
-    uint64 internal constant ETH_SEPOLIA_CHAIN_SELECTOR = 16015286601757825753;
-    uint64 internal constant BASE_SEPOLIA_CHAIN_SELECTOR = 580965213822371589;
-    uint64 internal constant ARB_SEPOLIA_CHAIN_SELECTOR = 3478487238524512106;
-
-    // ─── CCIP Router Addresses ──────────────────────────────────────────
-    /// @notice CCIP Router address for Base Sepolia
-    /// @dev From DESCRIPTION.md: 0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93
-    address internal constant BASE_SEPOLIA_ROUTER = address(0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93);
-
-    /// @notice CCIP Router address for Arbitrum Sepolia
-    /// @dev From DESCRIPTION.md: 0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165
-    address internal constant ARB_SEPOLIA_ROUTER = address(0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165);
-
     // ─── Chainlink Forwarder ─────────────────────────────────────────────
     /// @notice Chainlink Forwarder address for CRE reports on Ethereum Sepolia
     address internal constant CHAINLINK_ETHEREUM_SEPOLIA_FORWARDER = address(0x15fC6ae953E024d975e77382eEeC56A9101f9F88);
 
-    // ─── CCIP Onramp Addresses ──────────────────────────────────────────
-    /// @notice CCIP Onramp address for Base Sepolia (sending to Ethereum Sepolia)
-    /// @dev From DESCRIPTION.md: 0x28A025d34c830BF212f5D2357C8DcAB32dD92A20
-    address internal constant BASE_SEPOLIA_ONRAMP = address(0x28A025d34c830BF212f5D2357C8DcAB32dD92A20);
-
-    /// @notice CCIP Onramp address for Arbitrum Sepolia (sending to Ethereum Sepolia)
-    /// @dev From DESCRIPTION.md: 0x64d78F20aD987c7D52FdCB8FB0777bD00de53210
-    address internal constant ARB_SEPOLIA_ONRAMP = address(0x64d78F20aD987c7D52FdCB8FB0777bD00de53210);
 
     // ─── Initialization ─────────────────────────────────────────────────
 
     constructor() {
         // Initialize default accepted tokens (USDC on Ethereum Sepolia)
         acceptedTokens.push(SEPOLIA_USDC);
+
+        // Add mock collateral token for testing from .env
+        string memory mockTokenStr = vm.envString("MOCK_COLLATERAL_TOKEN");
+        address mockToken = _parseAddress(mockTokenStr);
+        if (mockToken != address(0)) {
+            acceptedTokens.push(mockToken);
+        }
         // Note: USDT and DAI would need to be added here for mainnet
 
         // Initialize default tenors (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 7Y, 10Y, 30Y)
@@ -84,7 +61,7 @@ abstract contract ClearRateScript is Script {
         // Remove "0x" prefix if present
         if (bytes(privateKeyStr).length >= 2) {
             bytes memory prefix = bytes(privateKeyStr);
-            if (prefix[0] == "0" && prefix[1] == "x") {
+            if (prefix[0] == 0x30 && prefix[1] == 0x78) {
                 privateKeyStr = _substring(privateKeyStr, 2, bytes(privateKeyStr).length);
             }
         }
@@ -130,41 +107,25 @@ abstract contract ClearRateScript is Script {
         return result;
     }
 
-    /// @notice Get accepted tokens for the hub.
+    /// @dev Helper to parse address from hex string
+    function _parseAddress(string memory addrStr) internal pure returns (address) {
+        // Remove "0x" prefix if present
+        string memory hexStr = addrStr;
+        if (bytes(hexStr).length >= 2) {
+            bytes memory prefix = bytes(hexStr);
+            if (prefix[0] == 0x30 && prefix[1] == 0x78) {
+                hexStr = _substring(hexStr, 2, bytes(hexStr).length);
+            }
+        }
+        
+        uint256 addrUint = _parseHex(hexStr);
+        return address(uint160(addrUint));
+    }
+
+    /// @notice Get accepted tokens for the protocol.
     /// @return tokens Array of accepted token addresses.
-    function getHubTokens() internal view returns (address[] memory tokens) {
+    function getAcceptedTokens() internal view returns (address[] memory tokens) {
         return acceptedTokens;
-    }
-
-    /// @notice Get accepted tokens for a specific spoke chain.
-    /// @param chainSelector The CCIP chain selector.
-    /// @return tokens Array of accepted token addresses for that chain.
-    function getSpokeTokens(uint64 chainSelector) internal pure returns (address[] memory tokens) {
-        tokens = new address[](1);
-        if (chainSelector == BASE_SEPOLIA_CHAIN_SELECTOR) {
-            tokens[0] = BASE_SEPOLIA_USDC;
-        } else if (chainSelector == ARB_SEPOLIA_CHAIN_SELECTOR) {
-            tokens[0] = ARB_SEPOLIA_USDC;
-        } else {
-            // Default to Sepolia tokens
-            tokens[0] = SEPOLIA_USDC;
-        }
-    }
-
-    /// @notice Get the CCIP router/onramp address for a given spoke chain.
-    /// @dev These are the onramp addresses used to SEND messages from the spoke TO the hub.
-    /// @param chainSelector The CCIP chain selector of the spoke chain.
-    /// @return router The CCIP onramp address.
-    function getCCIPRouter(uint64 chainSelector) internal pure returns (address router) {
-        if (chainSelector == BASE_SEPOLIA_CHAIN_SELECTOR) {
-            // Base Sepolia -> Ethereum Sepolia onramp
-            return BASE_SEPOLIA_ONRAMP;
-        } else if (chainSelector == ARB_SEPOLIA_CHAIN_SELECTOR) {
-            // Arbitrum Sepolia -> Ethereum Sepolia onramp
-            return ARB_SEPOLIA_ONRAMP;
-        }
-        // Default: return Base Sepolia onramp
-        return BASE_SEPOLIA_ONRAMP;
     }
 
     /// @notice Get the Chainlink Forwarder address for CRE reports.

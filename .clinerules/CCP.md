@@ -97,3 +97,14 @@ On payment dates (quarterly, semi-annual, etc.), the CCP calculates the net cash
 | **Float Leg** | `Notional * (API_Reference_Rate) * DayCountFraction` |
 | **Settlement** | `Net(Fixed - Float)` |
 
+
+Example for how it's supposed to work
+
+1. Deploy contracts: `make deploy-contracts-sepolia`
+2. Deployer whitelists the user addresses: `make whitelist-users-sepolia`
+3. Users deposit collateral: `make deposit-margin-sepolia`
+4. Create a trade and user signatures: `make create-trade-sepolia`
+5. Call the cre api to create the swap: `cre workflow simulate create-trade --target staging-settings --broadcast`
+7. Every 6 hours the swap is checked with a cre cron job and if needed it's settled or matured: `cre workflow simulate settle-swaps --target staging-settings --broadcast`
+8. The user can withdraw their collateral after the trade is settled: `make withdraw-margin-sepolia`
+
