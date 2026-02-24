@@ -181,43 +181,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         bytes calldata sigA,
         bytes calldata sigB
     ) external nonReentrant onlyRole(OPERATOR_ROLE) {
-        // ── Validation ──
-        _validateTrade(trade);
-
-        // ── Signature Verification ──
-        _verifySignature(trade, trade.partyA, sigA);
-        _verifySignature(trade, trade.partyB, sigB);
-
-        // ── Whitelist Check ──
-        address ownerA = whitelist.getAccountOwner(trade.partyA);
-        address ownerB = whitelist.getAccountOwner(trade.partyB);
-        if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
-        if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
-
-        // ── Margin Check ──
-        uint256 tenor = trade.maturityDate - trade.startDate;
-        uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
-
-        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
-            revert InsufficientMarginForTrade(trade.partyA);
-        }
-        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
-            revert InsufficientMarginForTrade(trade.partyB);
-        }
-
-        // Mark trade as submitted
-        tradeSubmitted[trade.tradeId] = true;
-
-        emit TradeSubmitted(
-            trade.tradeId,
-            trade.partyA,
-            trade.partyB,
-            trade.notional,
-            trade.fixedRateBps
-        );
-
-        // ── Novation ──
-        _novate(trade, ownerA, ownerB, imRequired);
+        _executeMatchedTrade(trade, sigA, sigB);
     }
 
     // ─── Variation Margin Settlement ────────────────────────────────────
@@ -365,7 +329,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     /// @notice Process the report data from Chainlink CRE.
     /// @dev Called by ReceiverTemplate.onReport() after validation.
-    ///      Decodes the trade submission data and calls submitMatchedTrade internally.
+    ///      Decodes the trade submission data and executes the matched trade.
     /// @param report ABI-encoded trade submission data:
     ///      - trade: MatchedTrade struct
     ///      - sigA: Signature from party A
@@ -381,40 +345,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         // Execute the trade submission (reverts if validation fails)
         // Note: This bypasses the OPERATOR_ROLE check since it's called via CRE report
-        _validateTrade(trade);
-        _verifySignature(trade, trade.partyA, sigA);
-        _verifySignature(trade, trade.partyB, sigB);
-
-        // Whitelist Check
-        address ownerA = whitelist.getAccountOwner(trade.partyA);
-        address ownerB = whitelist.getAccountOwner(trade.partyB);
-        if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
-        if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
-
-        // Margin Check
-        uint256 tenor = trade.maturityDate - trade.startDate;
-        uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
-
-        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
-            revert InsufficientMarginForTrade(trade.partyA);
-        }
-        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
-            revert InsufficientMarginForTrade(trade.partyB);
-        }
-
-        // Mark trade as submitted
-        tradeSubmitted[trade.tradeId] = true;
-
-        emit TradeSubmitted(
-            trade.tradeId,
-            trade.partyA,
-            trade.partyB,
-            trade.notional,
-            trade.fixedRateBps
-        );
-
-        // Execute novation
-        _novate(trade, ownerA, ownerB, imRequired);
+        _executeMatchedTrade(trade, sigA, sigB);
     }
 
     /// @inheritdoc AccessControl
@@ -449,6 +380,51 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     }
 
     // ─── Internal Functions ─────────────────────────────────────────────
+
+    /// @dev Execute a matched trade: validate, verify signatures, check margins, and novate.
+    function _executeMatchedTrade(
+        MatchedTrade memory trade,
+        bytes memory sigA,
+        bytes memory sigB
+    ) internal {
+        // ── Validation ──
+        _validateTrade(trade);
+
+        // ── Signature Verification ──
+        _verifySignature(trade, trade.partyA, sigA);
+        _verifySignature(trade, trade.partyB, sigB);
+
+        // ── Whitelist Check ──
+        address ownerA = whitelist.getAccountOwner(trade.partyA);
+        address ownerB = whitelist.getAccountOwner(trade.partyB);
+        if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
+        if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
+
+        // ── Margin Check ──
+        uint256 tenor = trade.maturityDate - trade.startDate;
+        uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
+
+        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyA);
+        }
+        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
+            revert InsufficientMarginForTrade(trade.partyB);
+        }
+
+        // Mark trade as submitted
+        tradeSubmitted[trade.tradeId] = true;
+
+        emit TradeSubmitted(
+            trade.tradeId,
+            trade.partyA,
+            trade.partyB,
+            trade.notional,
+            trade.fixedRateBps
+        );
+
+        // ── Novation ──
+        _novate(trade, ownerA, ownerB, imRequired);
+    }
 
     /// @dev Validate trade parameters.
     function _validateTrade(MatchedTrade memory trade) internal view {
