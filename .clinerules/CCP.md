@@ -111,4 +111,4 @@ Example for how it's supposed to work
 
 
 Read commands:
-1. Free margin: `cd contracts && make get-free-margin-sepolia && cd ..`
+1. Free margin: `cd contracts && make get-margin-data-sepolia && cd ..`

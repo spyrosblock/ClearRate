@@ -81,15 +81,19 @@ deposit-margin-sepolia:
 # READ MARGIN DATA
 # ============================================
 
-# Get free margin for all accounts from .env on Sepolia
-get-free-margin-sepolia:
-	@echo "Reading free margin for accounts on Ethereum Sepolia..."
+# Get all margin data for all accounts from .env on Sepolia
+get-margin-data-sepolia:
+	@echo "Reading margin data for accounts on Ethereum Sepolia..."
 	@echo "========================================================"
 	@echo "Account ID $(USER1_ACCOUNT_ID) (USER1):"
-	@cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec
+	@echo "  Total Collateral:  $$(cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Locked IM:         $$(cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Free Margin:       $$(cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
 	@echo ""
 	@echo "Account ID $(USER2_ACCOUNT_ID) (USER2):"
-	@cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec
+	@echo "  Total Collateral:  $$(cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Locked IM:         $$(cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Free Margin:       $$(cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
 	@echo "========================================================"
 
 # ============================================
@@ -130,8 +134,8 @@ help:
 	@echo "  make whitelist-users-sepolia - Whitelist 2 users on Ethereum Sepolia"
 	@echo ""
 	@echo "Margin:"
-	@echo "  make deposit-margin-sepolia  - Deposit margin for 2 users on Ethereum Sepolia"
-	@echo "  make get-free-margin-sepolia - Read free margin for all accounts on Ethereum Sepolia"
+	@echo "  make deposit-margin-sepolia   - Deposit margin for 2 users on Ethereum Sepolia"
+	@echo "  make get-margin-data-sepolia   - Read all margin data for all accounts on Ethereum Sepolia"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make extract-abis  - Extract contract ABIs"
