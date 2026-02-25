@@ -38,7 +38,7 @@ format:
 # Deploy contracts to Sepolia
 deploy-contracts-sepolia:
 	@echo "Deploying contracts to Ethereum Sepolia..."
-	forge script script/Deploy.s.sol:Deploy \
+	@forge script script/Deploy.s.sol:Deploy \
 		--rpc-url sepolia \
 		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \
@@ -48,8 +48,7 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "Update the deployments.txt file with the deployed contract addresses."
-	@echo "Update the contract addresses that are stored in the .env file."
+	@echo "Update the .env file with the deployed contract addresses."
 
 
 # ============================================
@@ -59,7 +58,7 @@ deploy-contracts-sepolia:
 # Whitelist 2 users on Sepolia
 whitelist-users-sepolia:
 	@echo "Whitelisting 2 users on Ethereum Sepolia..."
-	forge script script/WhitelistUsers.s.sol:WhitelistUsers \
+	@forge script script/WhitelistUsers.s.sol:WhitelistUsers \
 		--rpc-url sepolia \
 		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \
@@ -72,11 +71,26 @@ whitelist-users-sepolia:
 # Deposit margin for 2 users on Sepolia
 deposit-margin-sepolia:
 	@echo "Depositing margin for 2 users on Ethereum Sepolia..."
-	forge script script/DepositMargin.s.sol:DepositMargin \
+	@forge script script/DepositMargin.s.sol:DepositMargin \
 		--rpc-url sepolia \
 		--broadcast \
 		-vv
 	@echo "Margin deposit complete!"
+
+# ============================================
+# READ MARGIN DATA
+# ============================================
+
+# Get free margin for all accounts from .env on Sepolia
+get-free-margin-sepolia:
+	@echo "Reading free margin for accounts on Ethereum Sepolia..."
+	@echo "========================================================"
+	@echo "Account ID $(USER1_ACCOUNT_ID) (USER1):"
+	@cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec
+	@echo ""
+	@echo "Account ID $(USER2_ACCOUNT_ID) (USER2):"
+	@cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec
+	@echo "========================================================"
 
 # ============================================
 # TRADE CREATION
@@ -90,7 +104,6 @@ create-trade-sepolia:
 # ============================================
 # ABI EXTRACTION
 # ============================================
-
 
 extract-abis:
 	node scripts-js/extractAbis.js
@@ -117,7 +130,8 @@ help:
 	@echo "  make whitelist-users-sepolia - Whitelist 2 users on Ethereum Sepolia"
 	@echo ""
 	@echo "Margin:"
-	@echo "  make deposit-margin-sepolia - Deposit margin for 2 users on Ethereum Sepolia"
+	@echo "  make deposit-margin-sepolia  - Deposit margin for 2 users on Ethereum Sepolia"
+	@echo "  make get-free-margin-sepolia - Read free margin for all accounts on Ethereum Sepolia"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make extract-abis  - Extract contract ABIs"

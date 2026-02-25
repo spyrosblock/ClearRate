@@ -139,6 +139,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     error InvalidTradeTerms();
     error NotPartyToTrade(bytes32 accountId, bytes32 tradeId);
     error PositionsNotCompressible();
+    error InvalidReportType(uint8 reportType);
 
     // ─── Constructor ────────────────────────────────────────────────────
 
@@ -192,16 +193,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     function settleVM(
         VMSettlement[] calldata settlements
     ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
-        for (uint256 i; i < settlements.length; ++i) {
-            marginVault.settleVariationMargin(
-                settlements[i].accountId,
-                settlements[i].vmAmount
-            );
-        }
+        _executeVMSettlement(settlements);
     }
-
-    /// @notice Settle VM for a single position using fresh NPV data.
-    /// @param tradeId The trade to settle.
     /// @param newNpv The new NPV from the fixed payer's perspective.
     function settlePositionVM(
         bytes32 tradeId,
@@ -329,23 +322,48 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     /// @notice Process the report data from Chainlink CRE.
     /// @dev Called by ReceiverTemplate.onReport() after validation.
-    ///      Decodes the trade submission data and executes the matched trade.
-    /// @param report ABI-encoded trade submission data:
-    ///      - trade: MatchedTrade struct
-    ///      - sigA: Signature from party A
-    ///      - sigB: Signature from party B
+    ///      Supports two report types:
+    ///      1. Trade submission: abi.encode(uint8(0), matchedTrade, sigA, sigB)
+    ///      2. VM settlement: abi.encode(uint8(1), VMSettlement[])
+    /// @param report ABI-encoded report data with type prefix
     function _processReport(
         bytes calldata report
     ) internal override {
-        // Decode the report data: (MatchedTrade trade, bytes sigA, bytes sigB)
-        (MatchedTrade memory trade, bytes memory sigA, bytes memory sigB) = abi.decode(
-            report,
-            (MatchedTrade, bytes, bytes)
-        );
+        // Decode the first byte to determine report type
+        (uint8 reportType) = abi.decode(report[:32], (uint8));
 
-        // Execute the trade submission (reverts if validation fails)
-        // Note: This bypasses the OPERATOR_ROLE check since it's called via CRE report
-        _executeMatchedTrade(trade, sigA, sigB);
+        if (reportType == 0) {
+            // Trade submission report
+            // Decode: (uint8, MatchedTrade trade, bytes sigA, bytes sigB)
+            (, MatchedTrade memory trade, bytes memory sigA, bytes memory sigB) = abi.decode(
+                report,
+                (uint8, MatchedTrade, bytes, bytes)
+            );
+            _executeMatchedTrade(trade, sigA, sigB);
+        } else if (reportType == 1) {
+            // VM settlement report
+            // Decode: (uint8, VMSettlement[] settlements)
+            (, VMSettlement[] memory settlements) = abi.decode(
+                report,
+                (uint8, VMSettlement[])
+            );
+            _executeVMSettlement(settlements);
+        } else {
+            revert InvalidReportType(reportType);
+        }
+    }
+
+    /// @dev Execute VM settlement for a batch of positions.
+    /// @param settlements Array of VM settlement entries.
+    function _executeVMSettlement(
+        VMSettlement[] memory settlements
+    ) internal {
+        for (uint256 i; i < settlements.length; ++i) {
+            marginVault.settleVariationMargin(
+                settlements[i].accountId,
+                settlements[i].vmAmount
+            );
+        }
     }
 
     /// @inheritdoc AccessControl

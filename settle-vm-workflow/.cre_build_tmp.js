@@ -10,7 +10,7 @@ var __export = (target, all) => {
     });
 };
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
-var version = "1.0.8";
+var version = "1.2.3";
 var BaseError;
 var init_errors = __esm(() => {
   BaseError = class BaseError2 extends Error {
@@ -319,7 +319,7 @@ function getParameterCacheKey(param, type, structs) {
     }
   if (type)
     return `${type}:${param}${structKey}`;
-  return param;
+  return `${param}${structKey}`;
 }
 var parameterCache;
 var init_cache = __esm(() => {
@@ -404,6 +404,8 @@ function parseAbiParameter(param, options) {
     components = { components: structs[match.type] };
   } else if (dynamicIntegerRegex.test(match.type)) {
     type = `${match.type}256`;
+  } else if (match.type === "address payable") {
+    type = "address";
   } else {
     type = match.type;
     if (!(options?.type === "struct") && !isSolidityType(type))
@@ -475,7 +477,7 @@ var init_utils = __esm(() => {
   init_splitParameters();
   init_cache();
   init_signatures();
-  abiParameterWithoutTupleRegex = /^(?<type>[a-zA-Z$_][a-zA-Z0-9$_]*)(?<array>(?:\[\d*?\])+?)?(?:\s(?<modifier>calldata|indexed|memory|storage{1}))?(?:\s(?<name>[a-zA-Z$_][a-zA-Z0-9$_]*))?$/;
+  abiParameterWithoutTupleRegex = /^(?<type>[a-zA-Z$_][a-zA-Z0-9$_]*(?:\spayable)?)(?<array>(?:\[\d*?\])+?)?(?:\s(?<modifier>calldata|indexed|memory|storage{1}))?(?:\s(?<name>[a-zA-Z$_][a-zA-Z0-9$_]*))?$/;
   abiParameterWithTupleRegex = /^\((?<type>.+?)\)(?<array>(?:\[\d*?\])+?)?(?:\s(?<modifier>calldata|indexed|memory|storage{1}))?(?:\s(?<name>[a-zA-Z$_][a-zA-Z0-9$_]*))?$/;
   dynamicIntegerRegex = /^u?int$/;
   protectedKeywordsRegex = /^(?:after|alias|anonymous|apply|auto|byte|calldata|case|catch|constant|copyof|default|defined|error|event|external|false|final|function|immutable|implements|in|indexed|inline|internal|let|mapping|match|memory|mutable|null|of|override|partial|private|promise|public|pure|reference|relocatable|return|returns|sizeof|static|storage|struct|super|supports|switch|this|true|try|typedef|typeof|var|view|virtual)$/;
@@ -516,7 +518,7 @@ function parseStructs(signatures) {
   }
   return resolvedStructs;
 }
-function resolveStructs(abiParameters, structs, ancestors = new Set) {
+function resolveStructs(abiParameters = [], structs = {}, ancestors = new Set) {
   const components = [];
   const length = abiParameters.length;
   for (let i2 = 0;i2 < length; i2++) {
@@ -535,7 +537,7 @@ function resolveStructs(abiParameters, structs, ancestors = new Set) {
         components.push({
           ...abiParameter,
           type: `tuple${array ?? ""}`,
-          components: resolveStructs(structs[type] ?? [], structs, new Set([...ancestors, type]))
+          components: resolveStructs(structs[type], structs, new Set([...ancestors, type]))
         });
       } else {
         if (isSolidityType(type))
@@ -607,7 +609,7 @@ function size(value2) {
   return value2.length;
 }
 var init_size = () => {};
-var version2 = "2.34.0";
+var version2 = "2.46.3";
 function walk(err, fn) {
   if (fn?.(err))
     return err;
@@ -1578,9 +1580,9 @@ function encodeBytes(value2, { param }) {
       encoded: concat([padHex(numberToHex(bytesSize, { size: 32 })), value_])
     };
   }
-  if (bytesSize !== Number.parseInt(paramSize))
+  if (bytesSize !== Number.parseInt(paramSize, 10))
     throw new AbiEncodingBytesSizeMismatchError({
-      expectedSize: Number.parseInt(paramSize),
+      expectedSize: Number.parseInt(paramSize, 10),
       value: value2
     });
   return { dynamic: false, encoded: padHex(value2, { dir: "right" }) };
@@ -5436,6 +5438,8 @@ var ListSchema = /* @__PURE__ */ messageDesc(file_values_v1_values, 3);
 var DecimalSchema = /* @__PURE__ */ messageDesc(file_values_v1_values, 4);
 var file_sdk_v1alpha_sdk = /* @__PURE__ */ fileDesc("ChVzZGsvdjFhbHBoYS9zZGsucHJvdG8SC3Nkay52MWFscGhhIrQBChVTaW1wbGVDb25zZW5zdXNJbnB1dHMSIQoFdmFsdWUYASABKAsyEC52YWx1ZXMudjEuVmFsdWVIABIPCgVlcnJvchgCIAEoCUgAEjUKC2Rlc2NyaXB0b3JzGAMgASgLMiAuc2RrLnYxYWxwaGEuQ29uc2Vuc3VzRGVzY3JpcHRvchIhCgdkZWZhdWx0GAQgASgLMhAudmFsdWVzLnYxLlZhbHVlQg0KC29ic2VydmF0aW9uIpABCglGaWVsZHNNYXASMgoGZmllbGRzGAEgAygLMiIuc2RrLnYxYWxwaGEuRmllbGRzTWFwLkZpZWxkc0VudHJ5Gk8KC0ZpZWxkc0VudHJ5EgsKA2tleRgBIAEoCRIvCgV2YWx1ZRgCIAEoCzIgLnNkay52MWFscGhhLkNvbnNlbnN1c0Rlc2NyaXB0b3I6AjgBIoYBChNDb25zZW5zdXNEZXNjcmlwdG9yEjMKC2FnZ3JlZ2F0aW9uGAEgASgOMhwuc2RrLnYxYWxwaGEuQWdncmVnYXRpb25UeXBlSAASLAoKZmllbGRzX21hcBgCIAEoCzIWLnNkay52MWFscGhhLkZpZWxkc01hcEgAQgwKCmRlc2NyaXB0b3IiagoNUmVwb3J0UmVxdWVzdBIXCg9lbmNvZGVkX3BheWxvYWQYASABKAwSFAoMZW5jb2Rlcl9uYW1lGAIgASgJEhQKDHNpZ25pbmdfYWxnbxgDIAEoCRIUCgxoYXNoaW5nX2FsZ28YBCABKAkilwEKDlJlcG9ydFJlc3BvbnNlEhUKDWNvbmZpZ19kaWdlc3QYASABKAwSEgoGc2VxX25yGAIgASgEQgIwABIWCg5yZXBvcnRfY29udGV4dBgDIAEoDBISCgpyYXdfcmVwb3J0GAQgASgMEi4KBHNpZ3MYBSADKAsyIC5zZGsudjFhbHBoYS5BdHRyaWJ1dGVkU2lnbmF0dXJlIjsKE0F0dHJpYnV0ZWRTaWduYXR1cmUSEQoJc2lnbmF0dXJlGAEgASgMEhEKCXNpZ25lcl9pZBgCIAEoDSJrChFDYXBhYmlsaXR5UmVxdWVzdBIKCgJpZBgBIAEoCRIlCgdwYXlsb2FkGAIgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueRIOCgZtZXRob2QYAyABKAkSEwoLY2FsbGJhY2tfaWQYBCABKAUiWgoSQ2FwYWJpbGl0eVJlc3BvbnNlEicKB3BheWxvYWQYASABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SAASDwoFZXJyb3IYAiABKAlIAEIKCghyZXNwb25zZSJYChNUcmlnZ2VyU3Vic2NyaXB0aW9uEgoKAmlkGAEgASgJEiUKB3BheWxvYWQYAiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55Eg4KBm1ldGhvZBgDIAEoCSJVChpUcmlnZ2VyU3Vic2NyaXB0aW9uUmVxdWVzdBI3Cg1zdWJzY3JpcHRpb25zGAEgAygLMiAuc2RrLnYxYWxwaGEuVHJpZ2dlclN1YnNjcmlwdGlvbiJACgdUcmlnZ2VyEg4KAmlkGAEgASgEQgIwABIlCgdwYXlsb2FkGAIgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueSInChhBd2FpdENhcGFiaWxpdGllc1JlcXVlc3QSCwoDaWRzGAEgAygFIrgBChlBd2FpdENhcGFiaWxpdGllc1Jlc3BvbnNlEkgKCXJlc3BvbnNlcxgBIAMoCzI1LnNkay52MWFscGhhLkF3YWl0Q2FwYWJpbGl0aWVzUmVzcG9uc2UuUmVzcG9uc2VzRW50cnkaUQoOUmVzcG9uc2VzRW50cnkSCwoDa2V5GAEgASgFEi4KBXZhbHVlGAIgASgLMh8uc2RrLnYxYWxwaGEuQ2FwYWJpbGl0eVJlc3BvbnNlOgI4ASKgAQoORXhlY3V0ZVJlcXVlc3QSDgoGY29uZmlnGAEgASgMEisKCXN1YnNjcmliZRgCIAEoCzIWLmdvb2dsZS5wcm90b2J1Zi5FbXB0eUgAEicKB3RyaWdnZXIYAyABKAsyFC5zZGsudjFhbHBoYS5UcmlnZ2VySAASHQoRbWF4X3Jlc3BvbnNlX3NpemUYBCABKARCAjAAQgkKB3JlcXVlc3QimQEKD0V4ZWN1dGlvblJlc3VsdBIhCgV2YWx1ZRgBIAEoCzIQLnZhbHVlcy52MS5WYWx1ZUgAEg8KBWVycm9yGAIgASgJSAASSAoVdHJpZ2dlcl9zdWJzY3JpcHRpb25zGAMgASgLMicuc2RrLnYxYWxwaGEuVHJpZ2dlclN1YnNjcmlwdGlvblJlcXVlc3RIAEIICgZyZXN1bHQiVgoRR2V0U2VjcmV0c1JlcXVlc3QSLAoIcmVxdWVzdHMYASADKAsyGi5zZGsudjFhbHBoYS5TZWNyZXRSZXF1ZXN0EhMKC2NhbGxiYWNrX2lkGAIgASgFIiIKE0F3YWl0U2VjcmV0c1JlcXVlc3QSCwoDaWRzGAEgAygFIqsBChRBd2FpdFNlY3JldHNSZXNwb25zZRJDCglyZXNwb25zZXMYASADKAsyMC5zZGsudjFhbHBoYS5Bd2FpdFNlY3JldHNSZXNwb25zZS5SZXNwb25zZXNFbnRyeRpOCg5SZXNwb25zZXNFbnRyeRILCgNrZXkYASABKAUSKwoFdmFsdWUYAiABKAsyHC5zZGsudjFhbHBoYS5TZWNyZXRSZXNwb25zZXM6AjgBIi4KDVNlY3JldFJlcXVlc3QSCgoCaWQYASABKAkSEQoJbmFtZXNwYWNlGAIgASgJIkUKBlNlY3JldBIKCgJpZBgBIAEoCRIRCgluYW1lc3BhY2UYAiABKAkSDQoFb3duZXIYAyABKAkSDQoFdmFsdWUYBCABKAkiSgoLU2VjcmV0RXJyb3ISCgoCaWQYASABKAkSEQoJbmFtZXNwYWNlGAIgASgJEg0KBW93bmVyGAMgASgJEg0KBWVycm9yGAQgASgJIm4KDlNlY3JldFJlc3BvbnNlEiUKBnNlY3JldBgBIAEoCzITLnNkay52MWFscGhhLlNlY3JldEgAEikKBWVycm9yGAIgASgLMhguc2RrLnYxYWxwaGEuU2VjcmV0RXJyb3JIAEIKCghyZXNwb25zZSJBCg9TZWNyZXRSZXNwb25zZXMSLgoJcmVzcG9uc2VzGAEgAygLMhsuc2RrLnYxYWxwaGEuU2VjcmV0UmVzcG9uc2UquAEKD0FnZ3JlZ2F0aW9uVHlwZRIgChxBR0dSRUdBVElPTl9UWVBFX1VOU1BFQ0lGSUVEEAASGwoXQUdHUkVHQVRJT05fVFlQRV9NRURJQU4QARIeChpBR0dSRUdBVElPTl9UWVBFX0lERU5USUNBTBACEiIKHkFHR1JFR0FUSU9OX1RZUEVfQ09NTU9OX1BSRUZJWBADEiIKHkFHR1JFR0FUSU9OX1RZUEVfQ09NTU9OX1NVRkZJWBAEKjkKBE1vZGUSFAoQTU9ERV9VTlNQRUNJRklFRBAAEgwKCE1PREVfRE9OEAESDQoJTU9ERV9OT0RFEAJCaAoPY29tLnNkay52MWFscGhhQghTZGtQcm90b1ABogIDU1hYqgILU2RrLlYxYWxwaGHKAgtTZGtcVjFhbHBoYeICF1Nka1xWMWFscGhhXEdQQk1ldGFkYXRh6gIMU2RrOjpWMWFscGhhYgZwcm90bzM", [file_google_protobuf_any, file_google_protobuf_empty, file_values_v1_values]);
 var SimpleConsensusInputsSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 0);
+var FieldsMapSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 1);
+var ConsensusDescriptorSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 2);
 var ReportRequestSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 3);
 var ReportResponseSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 4);
 var CapabilityRequestSchema = /* @__PURE__ */ messageDesc(file_sdk_v1alpha_sdk, 6);
@@ -5804,37 +5808,6 @@ class ClientLogTrigger {
     return rawOutput;
   }
 }
-var file_capabilities_networking_confidentialhttp_v1alpha_client = /* @__PURE__ */ fileDesc("Cj1jYXBhYmlsaXRpZXMvbmV0d29ya2luZy9jb25maWRlbnRpYWxodHRwL3YxYWxwaGEvY2xpZW50LnByb3RvEjBjYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGEiUAoQU2VjcmV0SWRlbnRpZmllchILCgNrZXkYASABKAkSEQoJbmFtZXNwYWNlGAIgASgJEhIKBW93bmVyGAMgASgJSACIAQFCCAoGX293bmVyIh4KDEhlYWRlclZhbHVlcxIOCgZ2YWx1ZXMYASADKAki1wQKC0hUVFBSZXF1ZXN0EgsKA3VybBgBIAEoCRIOCgZtZXRob2QYAiABKAkSFQoLYm9keV9zdHJpbmcYAyABKAlIABIUCgpib2R5X2J5dGVzGAggASgMSAASZgoNbXVsdGlfaGVhZGVycxgEIAMoCzJPLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVxdWVzdC5NdWx0aUhlYWRlcnNFbnRyeRJ3ChZ0ZW1wbGF0ZV9wdWJsaWNfdmFsdWVzGAUgAygLMlcuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLkhUVFBSZXF1ZXN0LlRlbXBsYXRlUHVibGljVmFsdWVzRW50cnkSHwoXY3VzdG9tX3Jvb3RfY2FfY2VydF9wZW0YBiABKAwSKgoHdGltZW91dBgHIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIWCg5lbmNyeXB0X291dHB1dBgJIAEoCBpzChFNdWx0aUhlYWRlcnNFbnRyeRILCgNrZXkYASABKAkSTQoFdmFsdWUYAiABKAsyPi5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGEuSGVhZGVyVmFsdWVzOgI4ARo7ChlUZW1wbGF0ZVB1YmxpY1ZhbHVlc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCBgoEYm9keSKPAgoMSFRUUFJlc3BvbnNlEhMKC3N0YXR1c19jb2RlGAEgASgNEgwKBGJvZHkYAiABKAwSZwoNbXVsdGlfaGVhZGVycxgDIAMoCzJQLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVzcG9uc2UuTXVsdGlIZWFkZXJzRW50cnkacwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEk0KBXZhbHVlGAIgASgLMj4uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEiyAEKF0NvbmZpZGVudGlhbEhUVFBSZXF1ZXN0El0KEXZhdWx0X2Rvbl9zZWNyZXRzGAEgAygLMkIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuY29uZmlkZW50aWFsaHR0cC52MWFscGhhLlNlY3JldElkZW50aWZpZXISTgoHcmVxdWVzdBgCIAEoCzI9LmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVxdWVzdDLKAQoGQ2xpZW50EpgBCgtTZW5kUmVxdWVzdBJJLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5Db25maWRlbnRpYWxIVFRQUmVxdWVzdBo+LmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmNvbmZpZGVudGlhbGh0dHAudjFhbHBoYS5IVFRQUmVzcG9uc2UaJYK1GCEIARIdY29uZmlkZW50aWFsLWh0dHBAMS4wLjAtYWxwaGFCpgIKNGNvbS5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5jb25maWRlbnRpYWxodHRwLnYxYWxwaGFCC0NsaWVudFByb3RvUAGiAgNDTkOqAjBDYXBhYmlsaXRpZXMuTmV0d29ya2luZy5Db25maWRlbnRpYWxodHRwLlYxYWxwaGHKAjBDYXBhYmlsaXRpZXNcTmV0d29ya2luZ1xDb25maWRlbnRpYWxodHRwXFYxYWxwaGHiAjxDYXBhYmlsaXRpZXNcTmV0d29ya2luZ1xDb25maWRlbnRpYWxodHRwXFYxYWxwaGFcR1BCTWV0YWRhdGHqAjNDYXBhYmlsaXRpZXM6Ok5ldHdvcmtpbmc6OkNvbmZpZGVudGlhbGh0dHA6OlYxYWxwaGFiBnByb3RvMw", [file_google_protobuf_duration, file_tools_generator_v1alpha_cre_metadata]);
-var HTTPResponseSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_confidentialhttp_v1alpha_client, 3);
-var ConfidentialHTTPRequestSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_confidentialhttp_v1alpha_client, 4);
-
-class ClientCapability2 {
-  static CAPABILITY_ID = "confidential-http@1.0.0-alpha";
-  static CAPABILITY_NAME = "confidential-http";
-  static CAPABILITY_VERSION = "1.0.0-alpha";
-  sendRequest(runtime, input) {
-    let payload;
-    if (input.$typeName) {
-      payload = input;
-    } else {
-      payload = fromJson(ConfidentialHTTPRequestSchema, input);
-    }
-    const capabilityId = ClientCapability2.CAPABILITY_ID;
-    const capabilityResponse = runtime.callCapability({
-      capabilityId,
-      method: "SendRequest",
-      payload,
-      inputSchema: ConfidentialHTTPRequestSchema,
-      outputSchema: HTTPResponseSchema
-    });
-    return {
-      result: () => {
-        const result = capabilityResponse.result();
-        return result;
-      }
-    };
-  }
-}
 var file_capabilities_networking_http_v1alpha_client = /* @__PURE__ */ fileDesc("CjFjYXBhYmlsaXRpZXMvbmV0d29ya2luZy9odHRwL3YxYWxwaGEvY2xpZW50LnByb3RvEiRjYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEiSgoNQ2FjaGVTZXR0aW5ncxINCgVzdG9yZRgBIAEoCBIqCgdtYXhfYWdlGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIh4KDEhlYWRlclZhbHVlcxIOCgZ2YWx1ZXMYASADKAki7wMKB1JlcXVlc3QSCwoDdXJsGAEgASgJEg4KBm1ldGhvZBgCIAEoCRJPCgdoZWFkZXJzGAMgAygLMjouY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlcXVlc3QuSGVhZGVyc0VudHJ5QgIYARIMCgRib2R5GAQgASgMEioKB3RpbWVvdXQYBSABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SSwoOY2FjaGVfc2V0dGluZ3MYBiABKAsyMy5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuQ2FjaGVTZXR0aW5ncxJWCg1tdWx0aV9oZWFkZXJzGAcgAygLMj8uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlcXVlc3QuTXVsdGlIZWFkZXJzRW50cnkaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaZwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEkEKBXZhbHVlGAIgASgLMjIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEi8QIKCFJlc3BvbnNlEhMKC3N0YXR1c19jb2RlGAEgASgNElAKB2hlYWRlcnMYAiADKAsyOy5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuUmVzcG9uc2UuSGVhZGVyc0VudHJ5QgIYARIMCgRib2R5GAMgASgMElcKDW11bHRpX2hlYWRlcnMYBCADKAsyQC5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuUmVzcG9uc2UuTXVsdGlIZWFkZXJzRW50cnkaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEaZwoRTXVsdGlIZWFkZXJzRW50cnkSCwoDa2V5GAEgASgJEkEKBXZhbHVlGAIgASgLMjIuY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLkhlYWRlclZhbHVlczoCOAEymAEKBkNsaWVudBJsCgtTZW5kUmVxdWVzdBItLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYS5SZXF1ZXN0Gi4uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlJlc3BvbnNlGiCCtRgcCAISGGh0dHAtYWN0aW9uc0AxLjAuMC1hbHBoYULqAQooY29tLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYUILQ2xpZW50UHJvdG9QAaICA0NOSKoCJENhcGFiaWxpdGllcy5OZXR3b3JraW5nLkh0dHAuVjFhbHBoYcoCJENhcGFiaWxpdGllc1xOZXR3b3JraW5nXEh0dHBcVjFhbHBoYeICMENhcGFiaWxpdGllc1xOZXR3b3JraW5nXEh0dHBcVjFhbHBoYVxHUEJNZXRhZGF0YeoCJ0NhcGFiaWxpdGllczo6TmV0d29ya2luZzo6SHR0cDo6VjFhbHBoYWIGcHJvdG8z", [file_google_protobuf_duration, file_tools_generator_v1alpha_cre_metadata]);
 var RequestSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_client, 2);
 var ResponseSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_client, 3);
@@ -5851,7 +5824,7 @@ class SendRequester {
   }
 }
 
-class ClientCapability3 {
+class ClientCapability2 {
   static CAPABILITY_ID = "http-actions@1.0.0-alpha";
   static CAPABILITY_NAME = "http-actions";
   static CAPABILITY_VERSION = "1.0.0-alpha";
@@ -5870,7 +5843,7 @@ class ClientCapability3 {
     } else {
       payload = fromJson(RequestSchema, input);
     }
-    const capabilityId = ClientCapability3.CAPABILITY_ID;
+    const capabilityId = ClientCapability2.CAPABILITY_ID;
     const capabilityResponse = runtime.callCapability({
       capabilityId,
       method: "SendRequest",
@@ -5893,50 +5866,11 @@ class ClientCapability3 {
     return runtime.runInNodeMode(wrappedFn, consensusAggregation, unwrapOptions);
   }
 }
-var file_capabilities_networking_http_v1alpha_trigger = /* @__PURE__ */ fileDesc("CjJjYXBhYmlsaXRpZXMvbmV0d29ya2luZy9odHRwL3YxYWxwaGEvdHJpZ2dlci5wcm90bxIkY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhIlYKBkNvbmZpZxJMCg9hdXRob3JpemVkX2tleXMYASADKAsyMy5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuQXV0aG9yaXplZEtleSJaCgdQYXlsb2FkEg0KBWlucHV0GAEgASgMEkAKA2tleRgCIAEoCzIzLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYS5BdXRob3JpemVkS2V5ImAKDUF1dGhvcml6ZWRLZXkSOwoEdHlwZRgBIAEoDjItLmNhcGFiaWxpdGllcy5uZXR3b3JraW5nLmh0dHAudjFhbHBoYS5LZXlUeXBlEhIKCnB1YmxpY19rZXkYAiABKAkqOwoHS2V5VHlwZRIYChRLRVlfVFlQRV9VTlNQRUNJRklFRBAAEhYKEktFWV9UWVBFX0VDRFNBX0VWTRABMpIBCgRIVFRQEmgKB1RyaWdnZXISLC5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGEuQ29uZmlnGi0uY2FwYWJpbGl0aWVzLm5ldHdvcmtpbmcuaHR0cC52MWFscGhhLlBheWxvYWQwARoggrUYHAgBEhhodHRwLXRyaWdnZXJAMS4wLjAtYWxwaGFC6wEKKGNvbS5jYXBhYmlsaXRpZXMubmV0d29ya2luZy5odHRwLnYxYWxwaGFCDFRyaWdnZXJQcm90b1ABogIDQ05IqgIkQ2FwYWJpbGl0aWVzLk5ldHdvcmtpbmcuSHR0cC5WMWFscGhhygIkQ2FwYWJpbGl0aWVzXE5ldHdvcmtpbmdcSHR0cFxWMWFscGhh4gIwQ2FwYWJpbGl0aWVzXE5ldHdvcmtpbmdcSHR0cFxWMWFscGhhXEdQQk1ldGFkYXRh6gInQ2FwYWJpbGl0aWVzOjpOZXR3b3JraW5nOjpIdHRwOjpWMWFscGhhYgZwcm90bzM", [file_tools_generator_v1alpha_cre_metadata]);
-var ConfigSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_trigger, 0);
-var PayloadSchema = /* @__PURE__ */ messageDesc(file_capabilities_networking_http_v1alpha_trigger, 1);
 var KeyType;
 (function(KeyType2) {
   KeyType2[KeyType2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
   KeyType2[KeyType2["ECDSA_EVM"] = 1] = "ECDSA_EVM";
 })(KeyType || (KeyType = {}));
-
-class HTTPCapability {
-  static CAPABILITY_ID = "http-trigger@1.0.0-alpha";
-  static CAPABILITY_NAME = "http-trigger";
-  static CAPABILITY_VERSION = "1.0.0-alpha";
-  trigger(config) {
-    const capabilityId = HTTPCapability.CAPABILITY_ID;
-    return new HTTPTrigger(config, capabilityId, "Trigger");
-  }
-}
-
-class HTTPTrigger {
-  _capabilityId;
-  _method;
-  config;
-  constructor(config, _capabilityId, _method) {
-    this._capabilityId = _capabilityId;
-    this._method = _method;
-    this.config = config.$typeName ? config : fromJson(ConfigSchema, config);
-  }
-  capabilityId() {
-    return this._capabilityId;
-  }
-  method() {
-    return this._method;
-  }
-  outputSchema() {
-    return PayloadSchema;
-  }
-  configAsAny() {
-    return anyPack(ConfigSchema, this.config);
-  }
-  adapt(rawOutput) {
-    return rawOutput;
-  }
-}
 var file_capabilities_scheduler_cron_v1_trigger = /* @__PURE__ */ fileDesc("CixjYXBhYmlsaXRpZXMvc2NoZWR1bGVyL2Nyb24vdjEvdHJpZ2dlci5wcm90bxIeY2FwYWJpbGl0aWVzLnNjaGVkdWxlci5jcm9uLnYxIhoKBkNvbmZpZxIQCghzY2hlZHVsZRgBIAEoCSJHCgdQYXlsb2FkEjwKGHNjaGVkdWxlZF9leGVjdXRpb25fdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiNQoNTGVnYWN5UGF5bG9hZBIgChhzY2hlZHVsZWRfZXhlY3V0aW9uX3RpbWUYASABKAk6AhgBMvUBCgRDcm9uElwKB1RyaWdnZXISJi5jYXBhYmlsaXRpZXMuc2NoZWR1bGVyLmNyb24udjEuQ29uZmlnGicuY2FwYWJpbGl0aWVzLnNjaGVkdWxlci5jcm9uLnYxLlBheWxvYWQwARJzCg1MZWdhY3lUcmlnZ2VyEiYuY2FwYWJpbGl0aWVzLnNjaGVkdWxlci5jcm9uLnYxLkNvbmZpZxotLmNhcGFiaWxpdGllcy5zY2hlZHVsZXIuY3Jvbi52MS5MZWdhY3lQYXlsb2FkIgmIAgGKtRgCCAEwARoagrUYFggBEhJjcm9uLXRyaWdnZXJAMS4wLjBCzQEKImNvbS5jYXBhYmlsaXRpZXMuc2NoZWR1bGVyLmNyb24udjFCDFRyaWdnZXJQcm90b1ABogIDQ1NDqgIeQ2FwYWJpbGl0aWVzLlNjaGVkdWxlci5Dcm9uLlYxygIeQ2FwYWJpbGl0aWVzXFNjaGVkdWxlclxDcm9uXFYx4gIqQ2FwYWJpbGl0aWVzXFNjaGVkdWxlclxDcm9uXFYxXEdQQk1ldGFkYXRh6gIhQ2FwYWJpbGl0aWVzOjpTY2hlZHVsZXI6OkNyb246OlYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_tools_generator_v1alpha_cre_metadata]);
 var ConfigSchema2 = /* @__PURE__ */ messageDesc(file_capabilities_scheduler_cron_v1_trigger, 0);
 var PayloadSchema2 = /* @__PURE__ */ messageDesc(file_capabilities_scheduler_cron_v1_trigger, 1);
@@ -7297,16 +7231,6 @@ var handler = (trigger, fn) => ({
   fn
 });
 prepareRuntime();
-var cre = {
-  capabilities: {
-    CronCapability,
-    HTTPCapability,
-    ConfidentialHTTPClient: ClientCapability2,
-    HTTPClient: ClientCapability3,
-    EVMClient: ClientCapability
-  },
-  handler
-};
 var LAST_FINALIZED_BLOCK_NUMBER = {
   absVal: Buffer.from([3]).toString("base64"),
   sign: "-1"
@@ -7325,7 +7249,7 @@ function sendRequesterSendReport(report, fn) {
   const request = fn(rawReport);
   return this.sendRequest(request);
 }
-ClientCapability3.prototype.sendReport = sendReport;
+ClientCapability2.prototype.sendReport = sendReport;
 SendRequester.prototype.sendReport = sendRequesterSendReport;
 var network = {
   chainId: "1",
@@ -10944,6 +10868,57 @@ var defaultLookup = new NetworkLookup({
   testnetBySelectorByFamily
 });
 var getNetwork = (options) => defaultLookup.find(options);
+
+class ConsensusImpl {
+  descriptor;
+  defaultValue;
+  constructor(descriptor, defaultValue) {
+    this.descriptor = descriptor;
+    this.defaultValue = defaultValue;
+  }
+  withDefault(t) {
+    return new ConsensusImpl(this.descriptor, t);
+  }
+  _usesUToForceShape(_) {}
+}
+function simpleDescriptor(agg) {
+  return create(ConsensusDescriptorSchema, {
+    descriptor: {
+      case: "aggregation",
+      value: agg
+    }
+  });
+}
+function median() {
+  return new ConsensusFieldAggregation(simpleDescriptor(AggregationType.MEDIAN));
+}
+
+class ConsensusFieldAggregation {
+  fieldDescriptor;
+  t;
+  u;
+  constructor(fieldDescriptor, t, u) {
+    this.fieldDescriptor = fieldDescriptor;
+    this.t = t;
+    this.u = u;
+  }
+}
+function ConsensusAggregationByFields(aggregation) {
+  const fieldMap = create(FieldsMapSchema);
+  Object.keys(aggregation).forEach((key) => {
+    const fieldFn = aggregation[key];
+    const fieldAggregation = fieldFn();
+    if (fieldAggregation.fieldDescriptor) {
+      fieldMap.fields[key] = fieldAggregation.fieldDescriptor;
+    }
+  });
+  return new ConsensusImpl(create(ConsensusDescriptorSchema, {
+    descriptor: {
+      case: "fieldsMap",
+      value: fieldMap
+    }
+  }));
+}
 
 class Int64 {
   static INT64_MIN = -(2n ** 63n);
@@ -15846,103 +15821,77 @@ var sendErrorResponse = (error) => {
 init_exports();
 init_encodeAbiParameters();
 var configSchema = exports_external.object({
+  schedule: exports_external.string(),
   evms: exports_external.array(exports_external.object({
     clearingHouseAddress: exports_external.string(),
     chainSelectorName: exports_external.string(),
     gasLimit: exports_external.string()
-  }))
-});
-var tradePayloadSchema = exports_external.object({
-  trade: exports_external.object({
-    tradeId: exports_external.string(),
-    partyA: exports_external.string(),
-    partyB: exports_external.string(),
-    notional: exports_external.string(),
-    fixedRateBps: exports_external.number(),
-    startDate: exports_external.number(),
-    maturityDate: exports_external.number(),
-    paymentInterval: exports_external.number(),
-    dayCountConvention: exports_external.number(),
-    floatingRateIndex: exports_external.string(),
-    nonce: exports_external.number(),
-    deadline: exports_external.number()
-  }),
-  sigA: exports_external.string(),
-  sigB: exports_external.string(),
-  metadata: exports_external.object({
-    notionalFormatted: exports_external.string(),
-    fixedRateFormatted: exports_external.string(),
-    tenorDays: exports_external.number(),
-    paymentIntervalDays: exports_external.number(),
-    partyAFormatted: exports_external.string(),
-    partyBFormatted: exports_external.string()
+  })),
+  vmSettlement: exports_external.object({
+    apiEndpoint: exports_external.string(),
+    fallbackEnabled: exports_external.boolean()
   }).optional()
 });
-var safeJsonStringify = (obj) => JSON.stringify(obj, (_, value2) => typeof value2 === "bigint" ? value2.toString() : value2, 2);
-var parseTradePayload = (input) => {
-  const payloadJson = JSON.parse(input.toString());
-  return tradePayloadSchema.parse(payloadJson);
-};
+var vmSettlementPayloadSchema = exports_external.object({
+  settlements: exports_external.array(exports_external.object({
+    accountId: exports_external.string(),
+    vmAmount: exports_external.string()
+  })),
+  metadata: exports_external.object({
+    settlementDate: exports_external.string(),
+    npvSource: exports_external.string()
+  }).optional()
+});
 var toBytes32 = (hexStr) => {
   const cleanHex = hexStr.startsWith("0x") ? hexStr.slice(2) : hexStr;
   const paddedHex = cleanHex.padStart(64, "0");
   return `0x${paddedHex}`;
 };
-var submitTradeToClearingHouse = (runtime2, evmClient, payload) => {
-  const evmConfig = runtime2.config.evms[0];
-  runtime2.log(`Submitting trade to ClearingHouse: ${payload.trade.tradeId}`);
-  const trade = payload.trade;
-  runtime2.log(`Trade Details:`);
-  runtime2.log(`  Trade ID: ${trade.tradeId}`);
-  runtime2.log(`  Party A: ${trade.partyA}`);
-  runtime2.log(`  Party B: ${trade.partyB}`);
-  runtime2.log(`  Notional: ${trade.notional}`);
-  runtime2.log(`  Fixed Rate: ${trade.fixedRateBps} bps`);
-  runtime2.log(`  Start Date: ${new Date(trade.startDate * 1000).toISOString()}`);
-  runtime2.log(`  Maturity Date: ${new Date(trade.maturityDate * 1000).toISOString()}`);
-  runtime2.log(`  Payment Interval: ${trade.paymentInterval} seconds`);
-  runtime2.log(`  Day Count Convention: ${trade.dayCountConvention}`);
-  runtime2.log(`  Floating Rate Index: ${trade.floatingRateIndex}`);
-  runtime2.log(`  Nonce: ${trade.nonce}`);
-  runtime2.log(`  Deadline: ${new Date(trade.deadline * 1000).toISOString()}`);
-  const tradeData = {
-    tradeId: toBytes32(trade.tradeId),
-    partyA: toBytes32(trade.partyA),
-    partyB: toBytes32(trade.partyB),
-    notional: BigInt(trade.notional),
-    fixedRateBps: BigInt(trade.fixedRateBps),
-    startDate: BigInt(trade.startDate),
-    maturityDate: BigInt(trade.maturityDate),
-    paymentInterval: BigInt(trade.paymentInterval),
-    dayCountConvention: trade.dayCountConvention,
-    floatingRateIndex: toBytes32(trade.floatingRateIndex),
-    nonce: BigInt(trade.nonce),
-    deadline: BigInt(trade.deadline)
-  };
-  const tradeDataArray = [
-    tradeData.tradeId,
-    tradeData.partyA,
-    tradeData.partyB,
-    tradeData.notional,
-    tradeData.fixedRateBps,
-    tradeData.startDate,
-    tradeData.maturityDate,
-    tradeData.paymentInterval,
-    BigInt(tradeData.dayCountConvention),
-    tradeData.floatingRateIndex,
-    tradeData.nonce,
-    tradeData.deadline
-  ];
-  const fullAbiParams = parseAbiParameters("uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes");
-  const callData = encodeAbiParameters(fullAbiParams, [
-    BigInt(0),
-    tradeDataArray,
-    payload.sigA,
-    payload.sigB
+var fetchVMSettlementData = (sendRequester, config) => {
+  if (!config.vmSettlement?.apiEndpoint) {
+    throw new Error("VM Settlement API endpoint is not configured");
+  }
+  const response = sendRequester.sendRequest({
+    method: "GET",
+    url: config.vmSettlement.apiEndpoint
+  }).result();
+  console.log("[DEBUG] Response status:", response.statusCode);
+  console.log("[DEBUG] Response body:", JSON.stringify(response.body));
+  if (response.statusCode !== 200) {
+    throw new Error(`VM Settlement API request failed with status: ${response.statusCode}`);
+  }
+  const responseText = Buffer.from(response.body).toString("utf-8");
+  console.log("[DEBUG] Response text:", responseText);
+  const data = JSON.parse(responseText);
+  return vmSettlementPayloadSchema.parse(data);
+};
+var writeVMSettlement = (runtime2, evmConfig, payload) => {
+  const network248 = getNetwork({
+    chainFamily: "evm",
+    chainSelectorName: evmConfig.chainSelectorName,
+    isTestnet: true
+  });
+  if (!network248) {
+    throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`);
+  }
+  const evmClient = new ClientCapability(network248.chainSelector.selector);
+  runtime2.log(`Settling VM for ${payload.settlements.length} accounts on ClearingHouse at ${evmConfig.clearingHouseAddress}`);
+  const settlementsArray = payload.settlements.map((s) => ({
+    accountId: toBytes32(s.accountId),
+    vmAmount: BigInt(s.vmAmount)
+  }));
+  for (let i2 = 0;i2 < settlementsArray.length; i2++) {
+    const s = settlementsArray[i2];
+    runtime2.log(`  Settlement ${i2 + 1}: ${s.accountId} -> ${s.vmAmount}`);
+  }
+  const vmSettlementParams = parseAbiParameters("uint8, (bytes32 accountId, int256 vmAmount)[]");
+  const reportData = encodeAbiParameters(vmSettlementParams, [
+    BigInt(1),
+    settlementsArray
   ]);
-  runtime2.log(`Encoded call data: ${callData}`);
+  runtime2.log(`Encoded report data: ${reportData}`);
   const reportResponse = runtime2.report({
-    encodedPayload: hexToBase64(callData),
+    encodedPayload: hexToBase64(reportData),
     encoderName: "evm",
     signingAlgo: "ecdsa",
     hashingAlgo: "keccak256"
@@ -15954,44 +15903,45 @@ var submitTradeToClearingHouse = (runtime2, evmClient, payload) => {
       gasLimit: evmConfig.gasLimit
     }
   }).result();
-  const txStatus = resp.txStatus;
-  if (txStatus !== TxStatus.SUCCESS) {
-    throw new Error(`Failed to submit trade: ${resp.errorMessage || txStatus}`);
+  if (resp.txStatus !== TxStatus.SUCCESS) {
+    throw new Error(`Failed to settle VM: ${resp.errorMessage || resp.txStatus}`);
   }
   const txHash = bytesToHex(resp.txHash || new Uint8Array(32));
-  runtime2.log(`Trade submitted successfully! TxHash: ${txHash}`);
-  runtime2.log(`   Verify execution: https://sepolia.etherscan.io/tx/${txHash}`);
+  runtime2.log(`VM settlement submitted successfully! TxHash: ${txHash}`);
   return txHash;
 };
-var onHTTPTrigger = (runtime2, evmClient, payload) => {
-  runtime2.log("HTTP trigger received for create-trade-workflow");
-  if (!payload.input || payload.input.length === 0) {
-    throw new Error("HTTP trigger payload is required");
+var executeVMSettlementWorkflow = (runtime2) => {
+  runtime2.log("=== VM Settlement Workflow Started ===");
+  runtime2.log(`Fetching VM settlement data from: ${runtime2.config.vmSettlement?.apiEndpoint}`);
+  const httpCapability = new ClientCapability2;
+  const vmSettlementData = httpCapability.sendRequest(runtime2, fetchVMSettlementData, ConsensusAggregationByFields({
+    settlements: median,
+    metadata: median
+  }))(runtime2.config).result();
+  runtime2.log(`VM Settlement Data: ${JSON.stringify(vmSettlementData)}`);
+  if (!vmSettlementData || !vmSettlementData.settlements) {
+    throw new Error("Failed to fetch VM settlement data or empty settlements returned");
   }
-  runtime2.log(`Payload bytes: ${payload.input.toString()}`);
-  try {
-    const tradePayload = parseTradePayload(payload.input);
-    runtime2.log(`Parsed trade payload: ${safeJsonStringify(tradePayload)}`);
-    const txHash = submitTradeToClearingHouse(runtime2, evmClient, tradePayload);
-    return `Trade submitted successfully! TxHash: ${txHash}`;
-  } catch (error) {
-    runtime2.log(`Error processing trade payload: ${error}`);
-    throw new Error(`Failed to process trade payload: ${error}`);
+  const evmConfig = runtime2.config.evms[0];
+  runtime2.log("Writing VM settlement to ClearingHouse...");
+  const txHash = writeVMSettlement(runtime2, evmConfig, vmSettlementData);
+  runtime2.log("=== VM Settlement Workflow Completed ===");
+  runtime2.log(`Accounts settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`);
+  return txHash;
+};
+var onCronTrigger = (runtime2, payload) => {
+  if (!payload.scheduledExecutionTime) {
+    throw new Error("Scheduled execution time is required");
   }
+  runtime2.log("VM Settlement workflow triggered by cron schedule");
+  return executeVMSettlementWorkflow(runtime2);
 };
 var initWorkflow = (config) => {
-  const httpTrigger = new cre.capabilities.HTTPCapability;
-  const network248 = getNetwork({
-    chainFamily: "evm",
-    chainSelectorName: config.evms[0].chainSelectorName,
-    isTestnet: true
-  });
-  if (!network248) {
-    throw new Error(`Network not found for chain selector name: ${config.evms[0].chainSelectorName}`);
-  }
-  const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
+  const cronTrigger = new CronCapability;
   return [
-    cre.handler(httpTrigger.trigger({}), (runtime2, payload) => onHTTPTrigger(runtime2, evmClient, payload))
+    handler(cronTrigger.trigger({
+      schedule: config.schedule
+    }), onCronTrigger)
   ];
 };
 async function main() {

@@ -20,6 +20,7 @@ This project implements an **onchain Central Counterparty Clearinghouse (CCP)** 
 | Offchain Compute | **Chainlink CRE** (TypeScript/Node.js) | Yield curve bootstrapping, VaR/SPAN risk models, NPV calculations |
 | Token Standard | **ERC-1155** (OpenZeppelin) | Position representation for novated IRS legs |
 | Oracle Infrastructure | **Chainlink Aggregator** | Discount factor and rate oracle delivery |
+| Workflows | **Chainlink CRE DON** | Automated VM settlement, trade creation, SOFR fetching |
 
 ### High-Level Architecture
 
@@ -49,6 +50,8 @@ This project implements an **onchain Central Counterparty Clearinghouse (CCP)** 
     │  • Yield curve bootstrap     │
     │  • NPV matrix computation    │
     │  • VaR / SPAN simulation     │
+    │  • VM settlement             │
+    │  • Trade creation            │
     └──────────────────────────────┘
 ```
 
@@ -63,8 +66,10 @@ This project implements an **onchain Central Counterparty Clearinghouse (CCP)** 
   foundryup
   ```
 - **Node.js** (v18+) and npm/yarn — for Chainlink CRE TypeScript workflows
+- **Bun** — for running TypeScript workflows (faster than Node.js)
 - **Chainlink CRE CLI** — for offchain compute workflow deployment
 - **Git** — version control
+- **Next.js** — for frontend development
 
 ### Installation
 ```bash
@@ -79,6 +84,18 @@ forge build
 
 # Run all tests
 forge test
+```
+
+### Running Next.js
+```bash
+# Navigate to Next.js app
+cd nextjs
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
 ```
 
 ### Key Dependencies (via `foundry.toml` remappings)
@@ -110,11 +127,10 @@ make deploy
 ```
 
 ### Chainlink CRE Workflow Simulation
-Run from the **project root directory**:
 
 ```bash
-cd workflow01 && bun install
-cre workflow simulate workflow01 --target staging-settings --broadcast
+cd create-trade-workflow && bun install
+cre workflow simulate . --target staging-settings --broadcast
 ```
 
 ---
@@ -130,13 +146,13 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 │   │   ├── core/                    # Core clearing and trade logic
 │   │   │   ├── ClearingHouse.sol    # Trade novation, EIP-712 matched trade intake
 │   │   │   ├── IRSInstrument.sol    # ERC-1155 position tokens for IRS legs
-│   │   │   └── PositionMath.sol     # Pure library: day-count fractions, stub periods, accrual
+│   │   │   └── PositionMath.sol      # Pure library: day-count fractions, stub periods, accrual
 │   │   ├── margin/                  # Margin and risk management
-│   │   │   ├── MarginVault.sol #  margin ledger per accountId
-│   │   │   └── RiskEngine.sol        # IM/MM validation, portfolio margin checks
+│   │   │   ├── MarginVault.sol      # Margin ledger per accountId
+│   │   │   └── RiskEngine.sol       # IM/MM validation, portfolio margin checks
 │   │   ├── oracles/                 # Oracle integrations
-│   │   │   └── YieldCurveOracle.sol  # Ingests discount factors from Chainlink CRE DON
-│   │   ├── liquidation/              # Liquidation mechanics
+│   │   │   └── YieldCurveOracle.sol # Ingests discount factors from Chainlink CRE DON
+│   │   ├── liquidation/             # Liquidation mechanics
 │   │   │   └── LiquidationEngine.sol # Dutch auction liquidations, position absorption
 │   │   ├── insurance/               # Clearinghouse backstop
 │   │   │   └── InsuranceFund.sol     # Capital injection when accounts go bankrupt
@@ -148,13 +164,16 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 │   │       └── ReceiverTemplate.sol
 │   │
 │   ├── script/                      # Foundry deployment scripts
-│   │   ├── Deploy.s.sol          # Deploys all contracts
-│   │   └── Script.sol                # Base script contract
+│   │   ├── Deploy.s.sol             # Deploys all contracts
+│   │   ├── DepositMargin.s.sol      # Deposit margin script
+│   │   ├── WhitelistUsers.s.sol     # Whitelist users script
+│   │   └── ClearRateScript.sol      # Base script contract
 │   │
 │   ├── test/                        # Test suite
 │   │   ├── Unit/                     # Unit tests
-│   │   │   ├── ClearingHouse.t.sol   # Unit tests for core clearing logic
-│   │   │   └── Whitelist.t.sol       # Unit tests for whitelist
+│   │   │   ├── ClearingHouse.t.sol  # Unit tests for core clearing logic
+│   │   │   └── Whitelist.t.sol      # Unit tests for whitelist
+│   │   ├── Integration/              # Integration tests
 │   │   └── mocks/                    # Mock contracts for testing
 │   │       └── ERC20Mock.sol         # Mock ERC20 for testing
 │   │
@@ -165,10 +184,25 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 │
 ├── sofr-rate-workflow/              # Chainlink CRE workflow (SOFR rate fetching)
 │   ├── main.ts                      # Main workflow entry point
-│   ├── config.staging.json          # Staging configuration
-│   ├── config.production.json       # Production configuration
-│   ├── workflow.yaml                # Workflow definition
-│   └── README.md                     # Workflow documentation
+│   ├── config.staging.json         # Staging configuration
+│   ├── config.production.json      # Production configuration
+│   ├── workflow.yaml               # Workflow definition
+│   └── README.md                    # Workflow documentation
+│
+├── settle-vm-workflow/              # Chainlink CRE workflow (VM settlement)
+│   ├── main.ts                      # Main workflow entry point
+│   ├── config.staging.json         # Staging configuration
+│   ├── config.production.json      # Production configuration
+│   ├── workflow.yaml               # Workflow definition
+│   ├── vm-settlement-example.json  # Example settlement payload
+│   └── README.md                    # Workflow documentation
+│
+├── create-trade-workflow/           # Chainlink CRE workflow (Trade creation)
+│   ├── main.ts                      # Main workflow entry point
+│   ├── config.staging.json         # Staging configuration
+│   ├── config.production.json      # Production configuration
+│   ├── workflow.yaml               # Workflow definition
+│   └── README.md                    # Workflow documentation
 │
 ├── project.yaml                     # Project configuration
 ├── secrets.yaml                     # Secrets configuration
@@ -181,7 +215,7 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 
 | File | Role | Critical Functions |
 |------|------|--------------------|
-| `ClearingHouse.sol` | Central coordinator | `submitMatchedTrade()`, `novate()`, `compressPositions()`, `settleVM()` |
+| `ClearingHouse.sol` | Central coordinator | `submitMatchedTrade()`, `novate()`, `compressPositions()`, `settleVM()`, `_processReport()` |
 | `IRSInstrument.sol` | Position representation | ERC-1155 mint/burn for IRS legs; stores swap terms (notional, fixed rate, tenor, maturity) |
 | `PositionMath.sol` | Math library (pure) | Day-count fraction (ACT/360, 30/360), stub period accrual, PV helpers |
 | `MarginVault.sol` | Margin ledger | `updateMargin()`, `getFreeMargin()`, `lockInitialMargin()`, `releaseMargin()` |
@@ -190,6 +224,26 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 | `LiquidationEngine.sol` | Liquidation | `liquidateAccount()`, `absorbPosition()`, Dutch auction pricing |
 | `InsuranceFund.sol` | Backstop capital | `injectCapital()`, `claimDeficit()` |
 | `Whitelist.sol` | Access control | `addParticipant()`, `removeParticipant()`, `isWhitelisted()` |
+
+### Workflow Key Files
+
+| Workflow | Purpose | Report Type |
+|----------|---------|-------------|
+| `sofr-rate-workflow/` | Fetches SOFR rates from external APIs | N/A |
+| `settle-vm-workflow/` | Settles variation margin for accounts | Type 1 (VM Settlement) |
+| `create-trade-workflow/` | Creates new IRS trades via CRE | Type 0 (Trade Submission) |
+| `workflow01/` | Generic workflow template | N/A |
+
+### Next.js API Routes
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/margin/account` | Get margin account details |
+| `GET /api/margin/initial` | Calculate initial margin |
+| `GET /api/sofr` | Get current SOFR rate |
+| `GET /api/swap/npv` | Calculate swap NPV |
+| `GET /api/trades` | List all trades |
+| `GET /api/yield-curve` | Get yield curve data |
 
 ---
 
@@ -215,9 +269,9 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 | Test Type | Location | Strategy |
 |-----------|----------|----------|
 | **Unit** | `contracts/test/Unit/` | Isolate each contract; mock dependencies; test all branches |
+| **Integration** | `contracts/test/Integration/` | Full flow: deposit → trade → novation → VM settlement → exit |
 | **Fuzz** | *(not yet implemented)* | Target `PositionMath.sol` — edge cases in day-count, compounding, overflow |
 | **Fork** | *(not yet implemented)* | Fork mainnet to test real oracle reads |
-| **Integration** | *(not yet implemented)* | Full flow: deposit → trade → novation → VM settlement → exit |
 | **Invariant** | *(not yet implemented)* | Clearinghouse solvency invariant: `sum(all_margins) >= sum(all_obligations)` |
 
 **Testing best practices:**
@@ -230,7 +284,8 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 
 1. **Local Development:** `cd contracts && forge build` → `forge test` → iterate
 2. **Testnet Deployment:** Deploy contracts to Ethereum Sepolia
-3. **CRE Workflow Testing:** Run locally with `bun install && cre workflow  simulate workflow01 --target staging-settings --broadcast` in `sofr-rate-workflow/`
+3. **CRE Workflow Testing:** Run locally with `bun install && cre workflow simulate . --target staging-settings --broadcast` in respective workflow directory
+4. **Frontend Development:** `cd nextjs && npm run dev`
 
 ---
 
@@ -251,6 +306,7 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 | **SPAN Margin** | Portfolio-based margining that accounts for correlation/netting across positions |
 | **Position Compression** | Canceling offsetting positions to free tied-up margin |
 | **Dutch Auction** | Liquidation mechanism where the price starts high and decreases until a buyer steps in |
+| **Report Type** | Chainlink CRE report identifier (0=Trade, 1=VM Settlement) |
 
 ### Core Abstractions
 
@@ -272,6 +328,10 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
    └── Free Margin (available for new trades)
    ```
 
+4. **CRE Report Types:** Chainlink CRE workflows send encoded reports to the ClearingHouse:
+   - `uint8(0)`: MatchedTrade[] - New trade submissions
+   - `uint8(1)`: VMSettlement[] - Variation margin settlements
+
 ### Design Patterns
 
 | Pattern | Where Used | Why |
@@ -282,6 +342,7 @@ cre workflow simulate workflow01 --target staging-settings --broadcast
 | **Library Pattern** | `PositionMath.sol` | Pure math isolated for gas efficiency and testability |
 | **Role-Based Access** | All admin functions | OpenZeppelin `AccessControl` with granular roles |
 | **Reentrancy Guard** | All vault and settlement functions | Prevents reentrancy attacks on margin operations |
+| **Chainlink DON Integration** | All workflows | Trust-minimized offchain computation |
 
 ### Critical Math
 
@@ -319,28 +380,6 @@ forge test --match-test "test_FullTradeLifecycle" -vvvv
 1. Add the stablecoin token address to the `MarginVault.sol` accepted-tokens list
 2. Add unit tests verifying deposit/withdrawal with the new stablecoin
 
-### Updating CRE Offchain Workflow
-```bash
-# 1. Navigate to the workflow directory
-cd workflow01
-
-# 2. Install dependencies
-bun install
-
-# 3. Test locally
-cre workflow simulate workflow01 --target staging-settings --broadcast
-
-```
-
-### Running Gas Snapshots
-```bash
-# Generate gas snapshot
-cd contracts
-forge snapshot
-
-# Compare against previous
-forge snapshot --diff .gas-snapshot
-```
 
 ---
 
@@ -355,6 +394,7 @@ forge snapshot --diff .gas-snapshot
 | Fuzz tests fail intermittently | Edge case in math | Check for overflow near `type(uint256).max`; add bounded assumptions with `vm.assume()` |
 | "Insufficient margin" on test trades | IM calculation mismatch | Verify `RiskEngine` risk weights match test setup |
 | ERC-1155 transfer reverts | Missing operator approval | Ensure `ClearingHouse` is approved operator on `IRSInstrument` |
+| Workflow simulation fails | Missing config or secrets | Check `config.staging.json` and ensure `.env` is set |
 
 ### Debugging Tips
 
@@ -387,6 +427,12 @@ forge snapshot --diff .gas-snapshot
    ```bash
    cd contracts
    forge test --gas-report --match-contract "ClearingHouseTest"
+   ```
+
+6. **Debug workflows:**
+   ```bash
+   cd <workflow-dir>
+   cre workflow simulate . --target staging-settings --debug
    ```
 
 ---
@@ -422,6 +468,7 @@ forge snapshot --diff .gas-snapshot
 
 > **📝 Notes:**
 > - The project uses `contracts/src/` for source code (not `contracts/`)
-> - CRE workflows are located in `sofr-rate-workflow/`
-> - Test directories Fuzz/, Fork/, Integration/, and Invariant/ are planned but not yet implemented
+> - CRE workflows are located in `sofr-rate-workflow/`, `settle-vm-workflow/`, and `create-trade-workflow/`
+> - Frontend API routes are in `nextjs/app/api/`
+> - Test directories Fuzz/, Fork/, and Invariant/ are planned but not yet implemented
 > - Environment configuration uses `.env` file (see `env_example` for template)

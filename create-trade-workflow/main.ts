@@ -156,13 +156,18 @@ const submitTradeToClearingHouse = (
 		tradeData.deadline,
 	];
 
-	// Encode the full report: abi.encode(trade, sigA, sigB)
-	// This matches the contract's expected: abi.decode(report, (MatchedTrade, bytes, bytes))
-	// The first parameter is the tuple (MatchedTrade), the next two are bytes (sigA, sigB)
+	// Encode the full report with report type prefix: abi.encode(uint8(0), trade, sigA, sigB)
+	// ReportType = 0 indicates trade submission
+	// This matches the contract's expected format in _processReport()
 	const fullAbiParams = parseAbiParameters(
-		'(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes',
+		'uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes',
 	)
-	const callData = encodeAbiParameters(fullAbiParams, [tradeDataArray, payload.sigA, payload.sigB])
+	const callData = encodeAbiParameters(fullAbiParams, [
+		BigInt(0), // Report type: 0 = trade submission
+		tradeDataArray,
+		payload.sigA,
+		payload.sigB,
+	])
 
 	runtime.log(`Encoded call data: ${callData}`)
 

@@ -1,0 +1,14 @@
+{
+  "schedule": "0 0 * * *",
+  "evms": [
+    {
+      "clearingHouseAddress": "0x90a6eAF30Ca1B7d358579542Be82271089Eac7C5",
+      "chainSelectorName": "ethereum-testnet-sepolia",
+      "gasLimit": "500000"
+    }
+  ],
+  "vmSettlement": {
+    "apiEndpoint": "https://clear-rate.vercel.app/api/margin/variation-margin",
+    "fallbackEnabled": true
+  }
+}

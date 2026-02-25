@@ -100,11 +100,15 @@ On payment dates (quarterly, semi-annual, etc.), the CCP calculates the net cash
 
 Example for how it's supposed to work
 
-1. Deploy contracts: `make deploy-contracts-sepolia`
-2. Deployer whitelists the user addresses: `make whitelist-users-sepolia`
-3. Users deposit collateral: `make deposit-margin-sepolia`
-4. Create a trade and user signatures: `make create-trade-sepolia`
-5. Call the cre api to create the swap: `cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/trade.json)" --non-interactive --trigger-index 0`
-6. Every 6 hours the swap is checked with a cre cron job and if needed it's settled or matured: `cre workflow simulate settle-swaps-workflow --target staging-settings --broadcast`
-7. The user can withdraw their collateral after the trade is settled: `make withdraw-margin-sepolia`
+1. Deploy contracts:`cd contracts && make deploy-contracts-sepolia && cd ..`
+2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json` and `settle-vm-workflow/config.staging.json` with new addresses)
+3. Deployer whitelists the user addresses: `cd contracts && make whitelist-users-sepolia && cd ..`
+4. Users deposit collateral: `cd contracts && make deposit-margin-sepolia && cd ..`
+5. Create a trade and user signatures: `cd contracts && make create-trade-sepolia && cd ..`
+6. Call the cre api to create the swap: `cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/trade.json)" --non-interactive --trigger-index 0`
+7. Settle the variation margin for all positions daily: `cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm-workflow --target staging-settings --broadcast`
+8. The user can withdraw their collateral after the trade is settled: `cd contracts && make withdraw-margin-sepolia && cd ..`
 
+
+Read commands:
+1. Free margin: `cd contracts && make get-free-margin-sepolia && cd ..`
