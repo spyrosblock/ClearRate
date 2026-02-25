@@ -81,19 +81,24 @@ deposit-margin-sepolia:
 # READ MARGIN DATA
 # ============================================
 
+# Helper function to format wei to readable format (18 decimals)
+define FORMAT_WEI
+$(shell echo "$(1)" | awk '{len=length($$1); if(len<=18){printf "0.%018d", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')
+endef
+
 # Get all margin data for all accounts from .env on Sepolia
 get-margin-data-sepolia:
 	@echo "Reading margin data for accounts on Ethereum Sepolia..."
 	@echo "========================================================"
 	@echo "Account ID $(USER1_ACCOUNT_ID) (USER1):"
-	@echo "  Total Collateral:  $$(cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
-	@echo "  Locked IM:         $$(cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
-	@echo "  Free Margin:       $$(cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Total Collateral: $(shell cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
+	@echo "  Locked IM:         $(shell cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
+	@echo "  Free Margin:       $(shell cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER1_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
 	@echo ""
 	@echo "Account ID $(USER2_ACCOUNT_ID) (USER2):"
-	@echo "  Total Collateral:  $$(cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
-	@echo "  Locked IM:         $$(cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
-	@echo "  Free Margin:       $$(cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec)"
+	@echo "  Total Collateral: $(shell cast call $(MARGIN_VAULT_ADDRESS) "getTotalCollateral(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
+	@echo "  Locked IM:         $(shell cast call $(MARGIN_VAULT_ADDRESS) "getLockedIM(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
+	@echo "  Free Margin:       $(shell cast call $(MARGIN_VAULT_ADDRESS) "getFreeMargin(bytes32)" $(shell echo "$(USER2_ACCOUNT_ID)" | awk '{printf "0x%064x", $$1}') --rpc-url sepolia | cast --to-dec | awk '{len=length($$1); if(len<=18){printf "0.%018s", $$1}else{printf "%s.%s", substr($$1,1,len-18), substr($$1,len-17)}}')"
 	@echo "========================================================"
 
 # ============================================

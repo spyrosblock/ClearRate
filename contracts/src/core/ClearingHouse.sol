@@ -195,6 +195,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
         _executeVMSettlement(settlements);
     }
+    
+    /// @param tradeId The unique identifier of the position to settle.
     /// @param newNpv The new NPV from the fixed payer's perspective.
     function settlePositionVM(
         bytes32 tradeId,
