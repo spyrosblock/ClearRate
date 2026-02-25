@@ -54,7 +54,7 @@ abstract contract ClearRateScript is Script {
 
     /// @notice Get the deployer address from the PRIVATE_KEY or DEPLOYER_PRIVATE_KEY environment variable.
     /// @return deployer The deployer address derived from the private key.
-    function getDeployer() internal returns (address deployer) {
+    function getDeployer() internal view returns (address deployer) {
         // Try to read DEPLOYER_PRIVATE_KEY from environment (from .env file)
         string memory privateKeyStr = vm.envString("DEPLOYER_PRIVATE_KEY");
         
@@ -137,7 +137,7 @@ abstract contract ClearRateScript is Script {
     /// @notice Log a deployed contract address.
     /// @param name_ The contract name.
     /// @param addr_ The deployed address.
-    function logDeployment(string memory name_, address addr_) internal view {
+    function logDeployment(string memory name_, address addr_) internal pure {
         console.log(string(abi.encodePacked("Deployed ", name_, " at: ")));
         console.logAddress(addr_);
     }
@@ -148,7 +148,7 @@ abstract contract ClearRateScript is Script {
     function logAllDeployments(
         string[] memory names_,
         address[] memory addrs_
-    ) internal view {
+    ) internal pure {
         console.log("\n=== ClearRate Deployment Summary ===");
         for (uint256 i; i < names_.length; ++i) {
             console.log(string(abi.encodePacked(names_[i], ": ")));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Script, console} from "forge-std/Script.sol";
+import {console} from "forge-std/Script.sol";
 import {ClearRateScript} from "./ClearRateScript.sol";
 import {Whitelist} from "../src/access/Whitelist.sol";
 import {MarginVault} from "../src/margin/MarginVault.sol";

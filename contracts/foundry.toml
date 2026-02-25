@@ -6,6 +6,16 @@ via_ir = true
 optimizer = true
 optimizer_runs = 200
 
+[lint]
+exclude_lints = [
+    "unsafe-typecast",
+    "mixed-case-variable",
+    "mixed-case-function",
+    "screaming-snake-case-immutable",
+    "pascal-case-struct",
+    "asm-keccak256"
+]
+
 remappings = [
     '@openzeppelin/=lib/openzeppelin-contracts/',
 ]

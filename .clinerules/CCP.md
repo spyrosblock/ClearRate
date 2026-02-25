@@ -112,3 +112,9 @@ Example for how it's supposed to work
 
 Read commands:
 1. Free margin: `cd contracts && make get-margin-data-sepolia && cd ..`
+
+
+Improvements:
+- When creating a new trade, take into account all other position that the user has in order to calculate the IM. Instead of `riskEngine.calculateIM(trade.notional, tenor)` you can do `riskEngine.calculateIM(otherTrades, trade.notional, tenor);`
+- 
+

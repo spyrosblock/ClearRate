@@ -11,7 +11,6 @@ import {Whitelist} from "../../src/access/Whitelist.sol";
 import {YieldCurveOracle} from "../../src/oracles/YieldCurveOracle.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title ClearingHouseTest

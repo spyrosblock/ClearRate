@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {Whitelist} from "../src/access/Whitelist.sol";
-import {MarginVault} from "../src/margin/MarginVault.sol";
 
 /// @title WhitelistUsers
 /// @notice Script to whitelist 2 users on the ClearRate protocol.

@@ -6,7 +6,6 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IRSInstrument} from "./IRSInstrument.sol";
-import {PositionMath} from "./PositionMath.sol";
 import {MarginVault} from "../margin/MarginVault.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
 import {Whitelist} from "../access/Whitelist.sol";
@@ -266,6 +265,9 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         uint256 tenor = posA.maturityDate - posA.startDate;
         uint256 imRelease = riskEngine.calculateIM(compressionAmount, tenor);
         marginVault.releaseInitialMargin(commonAccount, imRelease);
+        
+        // Update Maintenance Margin after position compression
+        _updateAccountMaintenanceMargin(commonAccount);
 
         emit PositionCompressed(commonAccount, tradeIdA, tradeIdB, compressionAmount);
     }
@@ -290,6 +292,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         marginVault.releaseInitialMargin(pos.partyA, imRelease);
         marginVault.releaseInitialMargin(pos.partyB, imRelease);
+
+        // Update Maintenance Margin after position settlement
+        _updateAccountMaintenanceMargin(pos.partyA);
+        _updateAccountMaintenanceMargin(pos.partyB);
 
         // Burn position tokens using originalNotional (tokens were minted with original amount)
         address ownerA = whitelist.getAccountOwner(pos.partyA);
@@ -355,19 +361,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         }
     }
 
-    /// @dev Execute VM settlement for a batch of positions.
-    /// @param settlements Array of VM settlement entries.
-    function _executeVMSettlement(
-        VMSettlement[] memory settlements
-    ) internal {
-        for (uint256 i; i < settlements.length; ++i) {
-            marginVault.settleVariationMargin(
-                settlements[i].accountId,
-                settlements[i].vmAmount
-            );
-        }
-    }
-
     /// @inheritdoc AccessControl
     /// @dev Overrides supportsInterface to include both AccessControl and ReceiverTemplate interfaces.
     function supportsInterface(
@@ -422,6 +415,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         // ── Margin Check ──
         uint256 tenor = trade.maturityDate - trade.startDate;
+
         uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
 
         if (!riskEngine.checkIM(trade.partyA, imRequired)) {
@@ -444,6 +438,20 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         // ── Novation ──
         _novate(trade, ownerA, ownerB, imRequired);
+    }
+
+
+    /// @dev Execute VM settlement for a batch of positions.
+    /// @param settlements Array of VM settlement entries.
+    function _executeVMSettlement(
+        VMSettlement[] memory settlements
+    ) internal {
+        for (uint256 i; i < settlements.length; ++i) {
+            marginVault.settleVariationMargin(
+                settlements[i].accountId,
+                settlements[i].vmAmount
+            );
+        }
     }
 
     /// @dev Validate trade parameters.
@@ -539,6 +547,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         marginVault.lockInitialMargin(trade.partyA, imRequired);
         marginVault.lockInitialMargin(trade.partyB, imRequired);
 
+        // Update Maintenance Margin for both parties
+        _updateAccountMaintenanceMargin(trade.partyA);
+        _updateAccountMaintenanceMargin(trade.partyB);
+
         // Store novated position
         positions[trade.tradeId] = NovatedPosition({
             tradeId: trade.tradeId,
@@ -562,5 +574,34 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         ++activePositionCount;
 
         emit TradeNovated(trade.tradeId, tokenIdA, tokenIdB);
+    }
+
+    /// @dev Calculate aggregate initial margin for all active positions of an account.
+    /// @param accountId The account identifier.
+    /// @return totalIM The total IM requirement.
+    function _calculateAggregateIM(bytes32 accountId) internal view returns (uint256 totalIM) {
+        bytes32[] memory tradeIds = accountPositions[accountId];
+        for (uint256 i = 0; i < tradeIds.length; ++i) {
+            NovatedPosition storage pos = positions[tradeIds[i]];
+            if (pos.active) {
+                uint256 tenor = pos.maturityDate - pos.startDate;
+                totalIM += riskEngine.calculateIM(pos.notional, tenor);
+            }
+        }
+    }
+
+    /// @dev Calculate aggregate maintenance margin for all active positions of an account.
+    /// @param accountId The account identifier.
+    /// @return totalMM The total MM requirement.
+    function _calculateAggregateMM(bytes32 accountId) internal view returns (uint256 totalMM) {
+        uint256 totalIM = _calculateAggregateIM(accountId);
+        totalMM = riskEngine.calculateMM(totalIM);
+    }
+
+    /// @dev Update the maintenance margin for an account based on all active positions.
+    /// @param accountId The account identifier.
+    function _updateAccountMaintenanceMargin(bytes32 accountId) internal {
+        uint256 newMM = _calculateAggregateMM(accountId);
+        riskEngine.updateMaintenanceMargin(accountId, newMM);
     }
 }
