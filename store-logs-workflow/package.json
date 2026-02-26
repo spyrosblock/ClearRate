@@ -1,5 +1,5 @@
 {
-  "name": "sofr-rate-workflow",
+  "name": "store-logs-workflow",
   "version": "1.0.0",
   "main": "dist/main.js",
   "private": true,

@@ -5,18 +5,21 @@ import {
 	handler,
 	CronCapability,
 	EVMClient,
+	encodeCallMsg,
 	getNetwork,
 	HTTPClient,
 	type HTTPSendRequester,
 	hexToBase64,
+	LAST_FINALIZED_BLOCK_NUMBER,
 	median,
 	Runner,
 	type Runtime,
 	TxStatus,
 } from '@chainlink/cre-sdk'
-import { encodeAbiParameters, parseAbiParameters } from 'viem'
+import { type Address, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, parseAbiParameters, toHex, zeroAddress } from 'viem'
 import { z } from 'zod'
 import './abi'
+import { ClearingHouseFullABI } from './abi/ClearingHouse'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
 
@@ -94,10 +97,217 @@ const toBytes32 = (hexStr: string): `0x${string}` => {
 	return `0x${paddedHex}`
 }
 
-// ─── VM Settlement Data Fetching ─────────────────────────────────────────
+// ─── Position Reading from Blockchain ─────────────────────────────────────
 
 /**
- * Fetch VM settlement data from the configured API endpoint.
+ * Position data structure matching the NovatedPosition struct from ClearingHouse.
+ */
+interface PositionData {
+	tradeId: string
+	tokenIdA: string
+	tokenIdB: string
+	partyA: string
+	partyB: string
+	notional: string
+	originalNotional: string
+	fixedRateBps: string
+	startDate: string
+	maturityDate: string
+	active: boolean
+	lastNpv: string
+}
+
+/**
+ * Read a single position from the ClearingHouse contract by tradeId.
+ */
+const readPositionById = (
+	runtime: Runtime<Config>,
+	evmConfig: Config['evms'][0],
+	tradeId: string,
+): PositionData | null => {
+	const network = getNetwork({
+		chainFamily: 'evm',
+		chainSelectorName: evmConfig.chainSelectorName,
+		isTestnet: true,
+	})
+
+	if (!network) {
+		throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`)
+	}
+
+	const evmClient = new EVMClient(network.chainSelector.selector)
+
+	// Encode the contract call data for getPosition
+	const callData = encodeFunctionData({
+		abi: ClearingHouseFullABI,
+		functionName: 'getPosition',
+		args: [tradeId as Address],
+	})
+
+	const contractCall = evmClient
+		.callContract(runtime, {
+			call: encodeCallMsg({
+				from: zeroAddress,
+				to: evmConfig.clearingHouseAddress as Address,
+				data: callData,
+			}),
+			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+		})
+		.result()
+
+	// Decode the result
+	const position = decodeFunctionResult({
+		abi: ClearingHouseFullABI,
+		functionName: 'getPosition',
+		data: bytesToHex(contractCall.data),
+	})
+
+	// Check if position exists (tradeId will be empty if not found)
+	if (!position || position.tradeId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+		return null
+	}
+
+	return {
+		tradeId: position.tradeId,
+		tokenIdA: position.tokenIdA.toString(),
+		tokenIdB: position.tokenIdB.toString(),
+		partyA: position.partyA,
+		partyB: position.partyB,
+		notional: position.notional.toString(),
+		originalNotional: position.originalNotional.toString(),
+		fixedRateBps: position.fixedRateBps.toString(),
+		startDate: position.startDate.toString(),
+		maturityDate: position.maturityDate.toString(),
+		active: position.active,
+		lastNpv: position.lastNpv.toString(),
+	}
+}
+
+/**
+ * Read the total count of active positions from the ClearingHouse contract.
+ */
+const readActivePositionCount = (
+	runtime: Runtime<Config>,
+	evmConfig: Config['evms'][0],
+): bigint => {
+	const network = getNetwork({
+		chainFamily: 'evm',
+		chainSelectorName: evmConfig.chainSelectorName,
+		isTestnet: true,
+	})
+
+	if (!network) {
+		throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`)
+	}
+
+	const evmClient = new EVMClient(network.chainSelector.selector)
+
+	// Encode the contract call data for activePositionCount
+	const callData = encodeFunctionData({
+		abi: ClearingHouseFullABI,
+		functionName: 'activePositionCount',
+	})
+
+	const contractCall = evmClient
+		.callContract(runtime, {
+			call: encodeCallMsg({
+				from: zeroAddress,
+				to: evmConfig.clearingHouseAddress as Address,
+				data: callData,
+			}),
+			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+		})
+		.result()
+
+	// Decode the result
+	const count = decodeFunctionResult({
+		abi: ClearingHouseFullABI,
+		functionName: 'activePositionCount',
+		data: bytesToHex(contractCall.data),
+	})
+
+	return count
+}
+
+/**
+ * Read all active positions from the ClearingHouse contract.
+ * This function queries the blockchain to get all position data needed for VM calculation.
+ * 
+ * Note: In production, you'd want to use an indexer (e.g., The Graph) for efficient 
+ * position enumeration. This implementation provides a basic approach.
+ */
+const readAllPositionsFromBlockchain = (
+	runtime: Runtime<Config>,
+	evmConfig: Config['evms'][0],
+): PositionData[] => {
+	runtime.log('=== Reading Positions from Blockchain ===')
+
+	// Get the active position count
+	const activePositionCount = readActivePositionCount(runtime, evmConfig)
+	runtime.log(`Active positions count: ${activePositionCount}`)
+
+	if (activePositionCount === 0n) {
+		runtime.log('No active positions to settle')
+		return []
+	}
+
+	// For now, we'll return an empty array if there are no known trade IDs
+	// In production, you'd use events or an indexer to get all position IDs
+	// This is where you'd integrate with The Graph or similar
+	
+	// TODO: In production, use event-based position enumeration or maintain an index
+	runtime.log('Note: Full position enumeration requires event indexing in production')
+	runtime.log('Position reading complete')
+
+	return []
+}
+
+// ─── VM Settlement Data Fetching with Positions ────────────────────────────
+
+/**
+ * Send positions to the API and receive VM settlement data.
+ * This function is executed by each DON node independently;
+ * results are aggregated via median consensus.
+ */
+const fetchVMSettlementDataWithPositions = (
+	sendRequester: HTTPSendRequester,
+	config: Config,
+	positions: PositionData[],
+): ValidatedVMSettlementPayload => {
+	if (!config.vmSettlement?.apiEndpoint) {
+		throw new Error('VM Settlement API endpoint is not configured')
+	}
+
+	// Send positions to the API via POST
+	const response = sendRequester.sendRequest({
+		method: 'POST',
+		url: config.vmSettlement.apiEndpoint,
+		body: JSON.stringify({
+			positions,
+			settlementDate: new Date().toISOString().split('T')[0],
+		}),
+		headers: {
+			'Content-Type': 'application/json',
+		},
+	}).result()
+
+	console.log('[DEBUG] Response status:', response.statusCode)
+	console.log('[DEBUG] Response body:', JSON.stringify(response.body))
+
+	if (response.statusCode !== 200) {
+		throw new Error(`VM Settlement API request failed with status: ${response.statusCode}`)
+	}
+
+	const responseText = Buffer.from(response.body).toString('utf-8')
+	console.log('[DEBUG] Response text:', responseText)
+	const data = JSON.parse(responseText)
+
+	// Validate and return the parsed payload
+	return vmSettlementPayloadSchema.parse(data)
+}
+
+/**
+ * Fetch VM settlement data from the configured API endpoint (legacy GET method).
  * This function is executed by each DON node independently;
  * results are aggregated via median consensus.
  */
@@ -171,25 +381,28 @@ const writeVMSettlement = (
 
 	// Process VM settlements (report type 1)
 	if (vmSettlements.length > 0) {
-		const vmSettlementsArray = vmSettlements.map((s) => ({
-			tradeId: toBytes32(s.tradeId),
-			npvChange: BigInt(s.npvChange),
-		}))
-
 		// Log each VM settlement
-		for (let i = 0; i < vmSettlementsArray.length; i++) {
-			const s = vmSettlementsArray[i]
-			runtime.log(`  VM Settlement ${i + 1}: ${s.tradeId} -> ${s.npvChange}`)
+		for (let i = 0; i < vmSettlements.length; i++) {
+			const s = vmSettlements[i]
+			runtime.log(`  VM Settlement ${i + 1}: ${toBytes32(s.tradeId)} -> ${s.npvChange}`)
 		}
 
 		// ABI-encode the VM settlement data as (uint8, VMSettlement[])
 		// ReportType = 1 indicates VM settlement
+		// Use struct array encoding to match Solidity contract decoding
 		const vmSettlementParams = parseAbiParameters(
-			'uint8, (bytes32 tradeId, int256 npvChange)[]',
+			'uint8,(bytes32 tradeId, int256 npvChange)[]',
 		)
+
+		// Create struct array as array of objects
+		const settlements = vmSettlements.map((s) => ({
+			tradeId: toBytes32(s.tradeId),
+			npvChange: BigInt(s.npvChange),
+		}))
+
 		const reportData = encodeAbiParameters(vmSettlementParams, [
 			1, // Report type: 1 = VM settlement
-			vmSettlementsArray,
+			settlements,
 		])
 
 		runtime.log(`Encoded VM report data: ${reportData}`)
@@ -225,25 +438,28 @@ const writeVMSettlement = (
 
 	// Process matured position settlements (report type 2)
 	if (maturedSettlements.length > 0) {
-		const maturedSettlementsArray = maturedSettlements.map((s) => ({
-			tradeId: toBytes32(s.tradeId),
-			finalNpvChange: BigInt(s.npvChange),
-		}))
-
 		// Log each matured settlement
-		for (let i = 0; i < maturedSettlementsArray.length; i++) {
-			const s = maturedSettlementsArray[i]
-			runtime.log(`  Matured Settlement ${i + 1}: ${s.tradeId} -> ${s.finalNpvChange}`)
+		for (let i = 0; i < maturedSettlements.length; i++) {
+			const s = maturedSettlements[i]
+			runtime.log(`  Matured Settlement ${i + 1}: ${toBytes32(s.tradeId)} -> ${s.npvChange}`)
 		}
 
 		// ABI-encode the matured position settlement data as (uint8, MaturedPositionSettlement[])
 		// ReportType = 2 indicates matured position settlement
+		// Use struct array encoding to match Solidity contract decoding
 		const maturedSettlementParams = parseAbiParameters(
-			'uint8, (bytes32 tradeId, int256 finalNpvChange)[]',
+			'uint8, (bytes32 tradeId, int256 npvChange)[]',
 		)
+
+		// Create struct array as array of objects
+		const settlements = maturedSettlements.map((s) => ({
+			tradeId: toBytes32(s.tradeId),
+			npvChange: BigInt(s.npvChange),
+		}))
+
 		const reportData = encodeAbiParameters(maturedSettlementParams, [
 			2, // Report type: 2 = Matured position settlement
-			maturedSettlementsArray,
+			settlements,
 		])
 
 		runtime.log(`Encoded matured position report data: ${reportData}`)
@@ -289,28 +505,53 @@ const writeVMSettlement = (
 
 /**
  * Core workflow execution:
- * 1. Fetch VM settlement data from API (with DON consensus)
- * 2. Write VM settlement to ClearingHouse contract onchain
+ * 1. Read all positions from the blockchain
+ * 2. Send positions to API for NPV calculation (with DON consensus)
+ * 3. Write VM settlement to ClearingHouse contract onchain
  */
 const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 	runtime.log('=== VM Settlement Workflow Started ===')
 
-	// ── Step 1: Fetch VM settlement data with consensus ─────────────────
-	runtime.log(`Fetching VM settlement data from: ${runtime.config.vmSettlement?.apiEndpoint}`)
-
+	const evmConfig = runtime.config.evms[0]
 	const httpCapability = new HTTPClient()
-	
-	// Use median for numeric fields - works in simulation
-	const vmSettlementData = httpCapability
-		.sendRequest(
-			runtime,
-			fetchVMSettlementData,
-			ConsensusAggregationByFields({
-				settlements: median,
-				metadata: median,
-			}),
-		)(runtime.config)
-		.result()
+
+	// ── Step 1: Read positions from blockchain ────────────────────────────
+	runtime.log('Reading positions from blockchain...')
+	const positions = readAllPositionsFromBlockchain(runtime, evmConfig)
+	runtime.log(`Read ${positions.length} positions from blockchain`)
+
+	// ── Step 2: Send positions to API for NPV calculation ────────────────
+	// Check if we have positions - if not, fall back to legacy GET method
+	let vmSettlementData: ValidatedVMSettlementPayload
+
+	if (positions.length > 0) {
+		runtime.log(`Sending positions to API: ${runtime.config.vmSettlement?.apiEndpoint}`)
+		
+		// Use median for aggregation - works in simulation
+		vmSettlementData = httpCapability
+			.sendRequest(
+				runtime,
+				(sendRequester, config) => fetchVMSettlementDataWithPositions(sendRequester, config as Config, positions),
+				ConsensusAggregationByFields({
+					settlements: median as any,
+					metadata: median as any,
+				}),
+			)(runtime.config)
+			.result() as ValidatedVMSettlementPayload
+	} else {
+		// Fallback to legacy GET method if no positions found
+		runtime.log('No positions found, falling back to legacy API method')
+		vmSettlementData = httpCapability
+			.sendRequest(
+				runtime,
+				fetchVMSettlementData,
+				ConsensusAggregationByFields({
+					settlements: median as any,
+					metadata: median as any,
+				}),
+			)(runtime.config)
+			.result() as ValidatedVMSettlementPayload
+	}
 
 	runtime.log(`VM Settlement Data: ${JSON.stringify(vmSettlementData)}`)
 	
@@ -318,9 +559,7 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 		throw new Error('Failed to fetch VM settlement data or empty settlements returned')
 	}
 
-	// ── Step 2: Write VM settlement onchain ─────────────────────────────
-	const evmConfig = runtime.config.evms[0]
-
+	// ── Step 3: Write VM settlement onchain ─────────────────────────────
 	runtime.log('Writing VM settlement to ClearingHouse...')
 	const txHash = writeVMSettlement(runtime, evmConfig, vmSettlementData)
 

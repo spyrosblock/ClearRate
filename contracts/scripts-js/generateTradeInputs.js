@@ -111,8 +111,8 @@ async function main() {
   // Floating rate index (SOFR)
   const floatingRateIndex = ethers.keccak256(ethers.toUtf8Bytes("SOFR"));
 
-  // Nonce for replay protection
-  const nonce = 1;
+  // Nonce for replay protection (random number as BigInt for EIP-712)
+  const nonce = Number(Number(Math.random()*10000000).toFixed(0));
 
   // Deadline for signature validity (24 hours from startDate)
   const deadline = startDate + 24 * 60 * 60;

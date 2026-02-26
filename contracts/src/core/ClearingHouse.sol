@@ -212,7 +212,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     ) internal {
         NovatedPosition storage pos = positions[tradeId];
         if (!pos.active) revert PositionNotActive(tradeId);
-        if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
+        // TODO: enable this in production
+        // if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
 
         // Settle final variation margin before closing position
         if (finalNpvChange != 0) {

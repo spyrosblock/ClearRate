@@ -1,13 +1,13 @@
 # ==========================================================================
-# CRE WORKFLOW SETTINGS — SOFR Rate Fetching Workflow
+# CRE WORKFLOW SETTINGS — Store Logs Workflow
 # ==========================================================================
-# Fetches SOFR rates from NY Fed, bootstraps yield curve, and writes
-# discount factors to YieldCurveOracle.sol onchain.
+# Stores novated trade events and position matured events from the
+# ClearingHouse contract to a PostgreSQL database.
 
 # ==========================================================================
 staging-settings:
   user-workflow:
-    workflow-name: "sofr-rate-fetcher-staging"
+    workflow-name: "store-logs-workflow"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.staging.json"
@@ -16,7 +16,7 @@ staging-settings:
 # ==========================================================================
 production-settings:
   user-workflow:
-    workflow-name: "sofr-rate-fetcher-production"
+    workflow-name: "store-logs-workflow-production"
   workflow-artifacts:
     workflow-path: "./main.ts"
     config-path: "./config.production.json"
