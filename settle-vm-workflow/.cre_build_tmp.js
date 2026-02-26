@@ -15834,8 +15834,9 @@ var configSchema = exports_external.object({
 });
 var vmSettlementPayloadSchema = exports_external.object({
   settlements: exports_external.array(exports_external.object({
-    accountId: exports_external.string(),
-    vmAmount: exports_external.string()
+    tradeId: exports_external.string(),
+    npvChange: exports_external.string(),
+    isFinal: exports_external.boolean()
   })),
   metadata: exports_external.object({
     settlementDate: exports_external.string(),
@@ -15875,39 +15876,83 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`);
   }
   const evmClient = new ClientCapability(network248.chainSelector.selector);
-  runtime2.log(`Settling VM for ${payload.settlements.length} accounts on ClearingHouse at ${evmConfig.clearingHouseAddress}`);
-  const settlementsArray = payload.settlements.map((s) => ({
-    accountId: toBytes32(s.accountId),
-    vmAmount: BigInt(s.vmAmount)
-  }));
-  for (let i2 = 0;i2 < settlementsArray.length; i2++) {
-    const s = settlementsArray[i2];
-    runtime2.log(`  Settlement ${i2 + 1}: ${s.accountId} -> ${s.vmAmount}`);
-  }
-  const vmSettlementParams = parseAbiParameters("uint8, (bytes32 accountId, int256 vmAmount)[]");
-  const reportData = encodeAbiParameters(vmSettlementParams, [
-    BigInt(1),
-    settlementsArray
-  ]);
-  runtime2.log(`Encoded report data: ${reportData}`);
-  const reportResponse = runtime2.report({
-    encodedPayload: hexToBase64(reportData),
-    encoderName: "evm",
-    signingAlgo: "ecdsa",
-    hashingAlgo: "keccak256"
-  }).result();
-  const resp = evmClient.writeReport(runtime2, {
-    receiver: evmConfig.clearingHouseAddress,
-    report: reportResponse,
-    gasConfig: {
-      gasLimit: evmConfig.gasLimit
+  const vmSettlements = payload.settlements.filter((s) => !s.isFinal);
+  const maturedSettlements = payload.settlements.filter((s) => s.isFinal);
+  runtime2.log(`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`);
+  runtime2.log(`  - VM settlements (non-final): ${vmSettlements.length}`);
+  runtime2.log(`  - Matured position settlements (final): ${maturedSettlements.length}`);
+  let txHash = "";
+  if (vmSettlements.length > 0) {
+    const vmSettlementsArray = vmSettlements.map((s) => ({
+      tradeId: toBytes32(s.tradeId),
+      npvChange: BigInt(s.npvChange)
+    }));
+    for (let i2 = 0;i2 < vmSettlementsArray.length; i2++) {
+      const s = vmSettlementsArray[i2];
+      runtime2.log(`  VM Settlement ${i2 + 1}: ${s.tradeId} -> ${s.npvChange}`);
     }
-  }).result();
-  if (resp.txStatus !== TxStatus.SUCCESS) {
-    throw new Error(`Failed to settle VM: ${resp.errorMessage || resp.txStatus}`);
+    const vmSettlementParams = parseAbiParameters("uint8, (bytes32 tradeId, int256 npvChange)[]");
+    const reportData = encodeAbiParameters(vmSettlementParams, [
+      1,
+      vmSettlementsArray
+    ]);
+    runtime2.log(`Encoded VM report data: ${reportData}`);
+    const reportResponse = runtime2.report({
+      encodedPayload: hexToBase64(reportData),
+      encoderName: "evm",
+      signingAlgo: "ecdsa",
+      hashingAlgo: "keccak256"
+    }).result();
+    const resp = evmClient.writeReport(runtime2, {
+      receiver: evmConfig.clearingHouseAddress,
+      report: reportResponse,
+      gasConfig: {
+        gasLimit: evmConfig.gasLimit
+      }
+    }).result();
+    if (resp.txStatus !== TxStatus.SUCCESS) {
+      throw new Error(`Failed to settle VM: ${resp.errorMessage || resp.txStatus}`);
+    }
+    txHash = bytesToHex(resp.txHash || new Uint8Array(32));
+    runtime2.log(`VM settlement submitted successfully! TxHash: ${txHash}`);
   }
-  const txHash = bytesToHex(resp.txHash || new Uint8Array(32));
-  runtime2.log(`VM settlement submitted successfully! TxHash: ${txHash}`);
+  if (maturedSettlements.length > 0) {
+    const maturedSettlementsArray = maturedSettlements.map((s) => ({
+      tradeId: toBytes32(s.tradeId),
+      finalNpvChange: BigInt(s.npvChange)
+    }));
+    for (let i2 = 0;i2 < maturedSettlementsArray.length; i2++) {
+      const s = maturedSettlementsArray[i2];
+      runtime2.log(`  Matured Settlement ${i2 + 1}: ${s.tradeId} -> ${s.finalNpvChange}`);
+    }
+    const maturedSettlementParams = parseAbiParameters("uint8, (bytes32 tradeId, int256 finalNpvChange)[]");
+    const reportData = encodeAbiParameters(maturedSettlementParams, [
+      2,
+      maturedSettlementsArray
+    ]);
+    runtime2.log(`Encoded matured position report data: ${reportData}`);
+    const reportResponse = runtime2.report({
+      encodedPayload: hexToBase64(reportData),
+      encoderName: "evm",
+      signingAlgo: "ecdsa",
+      hashingAlgo: "keccak256"
+    }).result();
+    const resp = evmClient.writeReport(runtime2, {
+      receiver: evmConfig.clearingHouseAddress,
+      report: reportResponse,
+      gasConfig: {
+        gasLimit: evmConfig.gasLimit
+      }
+    }).result();
+    if (resp.txStatus !== TxStatus.SUCCESS) {
+      throw new Error(`Failed to settle matured positions: ${resp.errorMessage || resp.txStatus}`);
+    }
+    txHash = bytesToHex(resp.txHash || new Uint8Array(32));
+    runtime2.log(`Matured position settlement submitted successfully! TxHash: ${txHash}`);
+  }
+  if (payload.settlements.length === 0) {
+    runtime2.log("No settlements to process");
+  }
   return txHash;
 };
 var executeVMSettlementWorkflow = (runtime2) => {
@@ -15926,7 +15971,7 @@ var executeVMSettlementWorkflow = (runtime2) => {
   runtime2.log("Writing VM settlement to ClearingHouse...");
   const txHash = writeVMSettlement(runtime2, evmConfig, vmSettlementData);
   runtime2.log("=== VM Settlement Workflow Completed ===");
-  runtime2.log(`Accounts settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`);
+  runtime2.log(`Trades settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`);
   return txHash;
 };
 var onCronTrigger = (runtime2, payload) => {

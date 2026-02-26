@@ -40,7 +40,7 @@ type Config = z.infer<typeof configSchema>
 // ─── VM Settlement Payload Schema ─────────────────────────────────────────
 
 /**
- * Expected API response structure from the variation-margin endpoint.
+ * Expected API response structure from the settlement endpoint.
  * 
  * Example API response:
  * ```json
@@ -48,7 +48,8 @@ type Config = z.infer<typeof configSchema>
  *   "settlements": [
  *     {
  *       "tradeId": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
- *       "npvChange": "1000000000000000000"
+ *       "npvChange": "1000000000000000000",
+ *       "isFinal": false
  *     }
  *   ],
  *   "metadata": {
@@ -60,12 +61,14 @@ type Config = z.infer<typeof configSchema>
  * 
  * - tradeId: bytes32 hex string (64 characters, may include 0x prefix)
  * - npvChange: string representation of int256 (positive = NPV increased from fixed payer's perspective)
+ * - isFinal: boolean indicating if this is a final matured position settlement (true) or regular VM settlement (false)
  */
 const vmSettlementPayloadSchema = z.object({
 	settlements: z.array(
 		z.object({
 			tradeId: z.string(),
 			npvChange: z.string(), // Can be positive or negative
+			isFinal: z.boolean(), // true = matured position settlement, false = regular VM
 		}),
 	),
 	metadata: z
@@ -78,6 +81,7 @@ const vmSettlementPayloadSchema = z.object({
 
 
 type ValidatedVMSettlementPayload = z.infer<typeof vmSettlementPayloadSchema>
+
 
 /**
  * Convert a hex string to a 32-byte padded bytes32
@@ -128,11 +132,13 @@ const fetchVMSettlementData = (
 // ─── Onchain Write: Settle VM on ClearingHouse ─────────────────────────────
 
 /**
- * Write VM settlement to the ClearingHouse contract.
+ * Write VM and/or matured position settlement to the ClearingHouse contract.
  * Uses CRE's consensus-signed report mechanism to deliver the data
  * through the KeystoneForwarder → consumer contract flow.
  *
  * The encoded payload matches the `_processReport(uint8, bytes)` signature.
+ * - ReportType = 1: VM settlement (isFinal = false)
+ * - ReportType = 2: Matured position settlement (isFinal = true)
  */
 const writeVMSettlement = (
 	runtime: Runtime<Config>,
@@ -151,64 +157,133 @@ const writeVMSettlement = (
 
 	const evmClient = new EVMClient(network.chainSelector.selector)
 
+	// Separate settlements into VM (regular) and matured (final) based on isFinal flag
+	const vmSettlements = payload.settlements.filter((s) => !s.isFinal)
+	const maturedSettlements = payload.settlements.filter((s) => s.isFinal)
+
 	runtime.log(
-		`Settling VM for ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
+		`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
 	)
+	runtime.log(`  - VM settlements (non-final): ${vmSettlements.length}`)
+	runtime.log(`  - Matured position settlements (final): ${maturedSettlements.length}`)
 
-	// Convert settlements to the format expected by the contract
-	const settlementsArray = payload.settlements.map((s) => ({
-		tradeId: toBytes32(s.tradeId),
-		npvChange: BigInt(s.npvChange),
-	}))
+	let txHash = ''
 
-	// Log each settlement
-	for (let i = 0; i < settlementsArray.length; i++) {
-		const s = settlementsArray[i]
-		runtime.log(`  Settlement ${i + 1}: ${s.tradeId} -> ${s.npvChange}`)
+	// Process VM settlements (report type 1)
+	if (vmSettlements.length > 0) {
+		const vmSettlementsArray = vmSettlements.map((s) => ({
+			tradeId: toBytes32(s.tradeId),
+			npvChange: BigInt(s.npvChange),
+		}))
+
+		// Log each VM settlement
+		for (let i = 0; i < vmSettlementsArray.length; i++) {
+			const s = vmSettlementsArray[i]
+			runtime.log(`  VM Settlement ${i + 1}: ${s.tradeId} -> ${s.npvChange}`)
+		}
+
+		// ABI-encode the VM settlement data as (uint8, VMSettlement[])
+		// ReportType = 1 indicates VM settlement
+		const vmSettlementParams = parseAbiParameters(
+			'uint8, (bytes32 tradeId, int256 npvChange)[]',
+		)
+		const reportData = encodeAbiParameters(vmSettlementParams, [
+			1, // Report type: 1 = VM settlement
+			vmSettlementsArray,
+		])
+
+		runtime.log(`Encoded VM report data: ${reportData}`)
+
+		// Step 1: Generate a consensus-signed report
+		const reportResponse = runtime
+			.report({
+				encodedPayload: hexToBase64(reportData),
+				encoderName: 'evm',
+				signingAlgo: 'ecdsa',
+				hashingAlgo: 'keccak256',
+			})
+			.result()
+
+		// Step 2: Submit the signed report to the ClearingHouse contract
+		const resp = evmClient
+			.writeReport(runtime, {
+				receiver: evmConfig.clearingHouseAddress,
+				report: reportResponse,
+				gasConfig: {
+					gasLimit: evmConfig.gasLimit,
+				},
+			})
+			.result()
+
+		if (resp.txStatus !== TxStatus.SUCCESS) {
+			throw new Error(`Failed to settle VM: ${resp.errorMessage || resp.txStatus}`)
+		}
+
+		txHash = bytesToHex(resp.txHash || new Uint8Array(32))
+		runtime.log(`VM settlement submitted successfully! TxHash: ${txHash}`)
 	}
 
-	// ABI-encode the VM settlement data as (uint8, VMSettlement[])
-	// ReportType = 1 indicates VM settlement
-	const vmSettlementParams = parseAbiParameters(
-		'uint8, (bytes32 tradeId, int256 npvChange)[]',
-	)
-	const reportData = encodeAbiParameters(vmSettlementParams, [
-		BigInt(1), // Report type: 1 = VM settlement
-		settlementsArray,
-	])
+	// Process matured position settlements (report type 2)
+	if (maturedSettlements.length > 0) {
+		const maturedSettlementsArray = maturedSettlements.map((s) => ({
+			tradeId: toBytes32(s.tradeId),
+			finalNpvChange: BigInt(s.npvChange),
+		}))
 
-	runtime.log(`Encoded report data: ${reportData}`)
+		// Log each matured settlement
+		for (let i = 0; i < maturedSettlementsArray.length; i++) {
+			const s = maturedSettlementsArray[i]
+			runtime.log(`  Matured Settlement ${i + 1}: ${s.tradeId} -> ${s.finalNpvChange}`)
+		}
 
-	// Step 1: Generate a consensus-signed report
-	const reportResponse = runtime
-		.report({
-			encodedPayload: hexToBase64(reportData),
-			encoderName: 'evm',
-			signingAlgo: 'ecdsa',
-			hashingAlgo: 'keccak256',
-		})
-		.result()
+		// ABI-encode the matured position settlement data as (uint8, MaturedPositionSettlement[])
+		// ReportType = 2 indicates matured position settlement
+		const maturedSettlementParams = parseAbiParameters(
+			'uint8, (bytes32 tradeId, int256 finalNpvChange)[]',
+		)
+		const reportData = encodeAbiParameters(maturedSettlementParams, [
+			2, // Report type: 2 = Matured position settlement
+			maturedSettlementsArray,
+		])
 
-	// Step 2: Submit the signed report to the ClearingHouse contract
-	const resp = evmClient
-		.writeReport(runtime, {
-			receiver: evmConfig.clearingHouseAddress,
-			report: reportResponse,
-			gasConfig: {
-				gasLimit: evmConfig.gasLimit,
-			},
-		})
-		.result()
+		runtime.log(`Encoded matured position report data: ${reportData}`)
 
-	if (resp.txStatus !== TxStatus.SUCCESS) {
-		throw new Error(`Failed to settle VM: ${resp.errorMessage || resp.txStatus}`)
+		// Step 1: Generate a consensus-signed report
+		const reportResponse = runtime
+			.report({
+				encodedPayload: hexToBase64(reportData),
+				encoderName: 'evm',
+				signingAlgo: 'ecdsa',
+				hashingAlgo: 'keccak256',
+			})
+			.result()
+
+		// Step 2: Submit the signed report to the ClearingHouse contract
+		const resp = evmClient
+			.writeReport(runtime, {
+				receiver: evmConfig.clearingHouseAddress,
+				report: reportResponse,
+				gasConfig: {
+					gasLimit: evmConfig.gasLimit,
+				},
+			})
+			.result()
+
+		if (resp.txStatus !== TxStatus.SUCCESS) {
+			throw new Error(`Failed to settle matured positions: ${resp.errorMessage || resp.txStatus}`)
+		}
+
+		txHash = bytesToHex(resp.txHash || new Uint8Array(32))
+		runtime.log(`Matured position settlement submitted successfully! TxHash: ${txHash}`)
 	}
 
-	const txHash = bytesToHex(resp.txHash || new Uint8Array(32))
-	runtime.log(`VM settlement submitted successfully! TxHash: ${txHash}`)
+	if (payload.settlements.length === 0) {
+		runtime.log('No settlements to process')
+	}
 
 	return txHash
 }
+
 
 // ─── Main Workflow Logic ────────────────────────────────────────────────────
 

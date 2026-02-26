@@ -48,7 +48,7 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "Update the .env file with the deployed contract addresses."
+	@echo "Update contracts/.env, create-trade-workflow/config.staging.json and settle-vm-workflow/config.staging.json with new addresses"
 
 
 # ============================================
