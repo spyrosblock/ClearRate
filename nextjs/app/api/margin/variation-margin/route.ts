@@ -17,13 +17,13 @@ export async function GET() {
   const variationMarginData = {
     settlements: [
       {
-        tradeId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+        tradeId: "0xa7acfb24dc069ee589e5667ccc60811c0c210f8b4725d66b8d4ef412d39d3b2e",
         npvChange: "1000000000000000000", // 1 WAD = positive NPV change (benefits party A)
         isFinal: false // Regular VM settlement (not matured position)
       },
       {
-        tradeId: "0x0000000000000000000000000000000000000000000000000000000000000002",
-        npvChange: "-1000000000000000000", // -1 WAD = negative NPV change (benefits party B)
+        tradeId: "0x0313f4e15d0bc0afbed03fa18bc19430ba6afbc16396d17bafa82a53348b09b3",
+        npvChange: "-2000000000000000000", // -1 WAD = negative NPV change (benefits party B)
         isFinal: false // Regular VM settlement (not matured position)
       }
     ],
