@@ -61,24 +61,10 @@ export async function POST(request: Request) {
     }
 
     // Calculate settlements for each position
-    // For now, we simulate NPV calculation - in production, this would call a pricing oracle
     const settlements: Settlement[] = positions
       .filter((pos) => pos.active) // Only process active positions
       .map((pos) => {
-        // Calculate simulated NPV change based on position data
-        // In production, this would use actual pricing data from an oracle
-        const notional = BigInt(pos.notional);
-        const fixedRateBps = BigInt(pos.fixedRateBps);
-        
-        // Simulate NPV change calculation:
-        // - Use notional and fixed rate to simulate a daily VM change
-        // - This is a placeholder - real implementation would use yield curve oracle
-        const daysInYear = BigInt(365);
-        const dailyRate = (notional * fixedRateBps) / (daysInYear * BigInt(10000));
-        
-        // Add some variation based on position to make it realistic
-        const tradeIdHash = BigInt(pos.tradeId.slice(2, 18)) % BigInt(1000000);
-        const npvChange = dailyRate + (tradeIdHash % BigInt(1000)) - BigInt(500);
+        const npvChange = 1e18;
         
         // Determine if position is matured (for demonstration, positions with maturity < now would be final)
         // In production, you'd check actual timestamps
