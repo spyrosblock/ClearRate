@@ -47,8 +47,8 @@ type Config = z.infer<typeof configSchema>
  * {
  *   "settlements": [
  *     {
- *       "accountId": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
- *       "vmAmount": "1000000000000000000"
+ *       "tradeId": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+ *       "npvChange": "1000000000000000000"
  *     }
  *   ],
  *   "metadata": {
@@ -58,14 +58,14 @@ type Config = z.infer<typeof configSchema>
  * }
  * ```
  * 
- * - accountId: bytes32 hex string (64 characters, may include 0x prefix)
- * - vmAmount: string representation of int256 (positive = credit, negative = debit)
+ * - tradeId: bytes32 hex string (64 characters, may include 0x prefix)
+ * - npvChange: string representation of int256 (positive = NPV increased from fixed payer's perspective)
  */
 const vmSettlementPayloadSchema = z.object({
 	settlements: z.array(
 		z.object({
-			accountId: z.string(),
-			vmAmount: z.string(), // Can be positive or negative
+			tradeId: z.string(),
+			npvChange: z.string(), // Can be positive or negative
 		}),
 	),
 	metadata: z
@@ -152,25 +152,25 @@ const writeVMSettlement = (
 	const evmClient = new EVMClient(network.chainSelector.selector)
 
 	runtime.log(
-		`Settling VM for ${payload.settlements.length} accounts on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
+		`Settling VM for ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
 	)
 
 	// Convert settlements to the format expected by the contract
 	const settlementsArray = payload.settlements.map((s) => ({
-		accountId: toBytes32(s.accountId),
-		vmAmount: BigInt(s.vmAmount),
+		tradeId: toBytes32(s.tradeId),
+		npvChange: BigInt(s.npvChange),
 	}))
 
 	// Log each settlement
 	for (let i = 0; i < settlementsArray.length; i++) {
 		const s = settlementsArray[i]
-		runtime.log(`  Settlement ${i + 1}: ${s.accountId} -> ${s.vmAmount}`)
+		runtime.log(`  Settlement ${i + 1}: ${s.tradeId} -> ${s.npvChange}`)
 	}
 
 	// ABI-encode the VM settlement data as (uint8, VMSettlement[])
 	// ReportType = 1 indicates VM settlement
 	const vmSettlementParams = parseAbiParameters(
-		'uint8, (bytes32 accountId, int256 vmAmount)[]',
+		'uint8, (bytes32 tradeId, int256 npvChange)[]',
 	)
 	const reportData = encodeAbiParameters(vmSettlementParams, [
 		BigInt(1), // Report type: 1 = VM settlement
@@ -250,7 +250,7 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 	const txHash = writeVMSettlement(runtime, evmConfig, vmSettlementData)
 
 	runtime.log('=== VM Settlement Workflow Completed ===')
-	runtime.log(`Accounts settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`)
+	runtime.log(`Trades settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`)
 
 	return txHash
 }

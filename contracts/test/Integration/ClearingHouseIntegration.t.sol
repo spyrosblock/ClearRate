@@ -3,12 +3,12 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {IClearingHouse} from "../../src/interfaces/IClearingHouse.sol";
 import {ClearingHouse} from "../../src/core/ClearingHouse.sol";
 import {IRSInstrument} from "../../src/core/IRSInstrument.sol";
 import {MarginVault} from "../../src/margin/MarginVault.sol";
 import {RiskEngine} from "../../src/margin/RiskEngine.sol";
 import {Whitelist} from "../../src/access/Whitelist.sol";
-import {YieldCurveOracle} from "../../src/oracles/YieldCurveOracle.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
@@ -22,7 +22,6 @@ contract ClearingHouseIntegrationTest is Test {
     MarginVault internal marginVault;
     RiskEngine internal riskEngine;
     Whitelist internal whitelist;
-    YieldCurveOracle internal oracle;
     ERC20Mock internal usdc;
     ERC20Mock internal dai;
 
@@ -98,7 +97,6 @@ contract ClearingHouseIntegrationTest is Test {
         tenors[0] = NINETY_DAYS;
         tenors[1] = ONE_YEAR;
         tenors[2] = 2 * ONE_YEAR;
-        oracle = new YieldCurveOracle(admin, 1 days, tenors);
 
         // Deploy IRSInstrument
         instrument = new IRSInstrument(admin, "https://metadata.clearrate.io/{id}.json");
@@ -110,8 +108,7 @@ contract ClearingHouseIntegrationTest is Test {
             address(instrument),
             address(marginVault),
             address(riskEngine),
-            address(whitelist),
-            address(oracle)
+            address(whitelist)
         );
 
         // Wire up roles
@@ -159,7 +156,7 @@ contract ClearingHouseIntegrationTest is Test {
         // ═══════════════════════════════════════════════════════════════
         bytes32 tradeId = keccak256("TRADE_INTEGRATION_1");
         
-        ClearingHouse.MatchedTrade memory trade = ClearingHouse.MatchedTrade({
+        IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
             tradeId: tradeId,
             partyA: ALICE_ACCOUNT,
             partyB: BOB_ACCOUNT,
@@ -185,7 +182,7 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(clearingHouse.activePositionCount(), 1);
 
         // Verify position was created
-        ClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
+        IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
         assertEq(pos.tradeId, tradeId);
         assertEq(pos.partyA, ALICE_ACCOUNT);
         assertEq(pos.partyB, BOB_ACCOUNT);
@@ -228,16 +225,20 @@ contract ClearingHouseIntegrationTest is Test {
         // Alice (fixed payer) profits from rate increase
         int256 npvChange = 10_000e6; // $10k profit for Alice
 
+        // Get current position to calculate newNpv (contract expects absolute NPV, not delta)
+        IClearingHouse.NovatedPosition memory posBeforeVM = clearingHouse.getPosition(tradeId);
+        int256 newNpv = posBeforeVM.lastNpv + npvChange;
+
         vm.prank(settler);
-        clearingHouse.settlePositionVM(tradeId, npvChange);
+        clearingHouse.settleVariationMarginSinglePosition(tradeId, newNpv);
 
         // Verify VM settlement
         assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceCollateralBefore + uint256(npvChange));
         assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobCollateralBefore - uint256(npvChange));
 
         // Verify lastNpv updated
-        ClearingHouse.NovatedPosition memory posAfterVM = clearingHouse.getPosition(tradeId);
-        assertEq(posAfterVM.lastNpv, npvChange);
+        IClearingHouse.NovatedPosition memory posAfterVM = clearingHouse.getPosition(tradeId);
+        assertEq(posAfterVM.lastNpv, newNpv);
         assertTrue(posAfterVM.active); // Still active
 
         // ═══════════════════════════════════════════════════════════════
@@ -250,10 +251,10 @@ contract ClearingHouseIntegrationTest is Test {
         uint256 bobLockedBeforeMaturity = marginVault.getLockedIM(BOB_ACCOUNT);
 
         vm.prank(operator);
-        clearingHouse.settleMaturedPosition(tradeId);
+        clearingHouse.settleMaturedPosition(tradeId, 0);
 
         // Verify position settled
-        ClearingHouse.NovatedPosition memory posMatured = clearingHouse.getPosition(tradeId);
+        IClearingHouse.NovatedPosition memory posMatured = clearingHouse.getPosition(tradeId);
         assertFalse(posMatured.active);
 
         // Verify IM released
@@ -298,19 +299,18 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(clearingHouse.getAccountPositions(BOB_ACCOUNT).length, 2);
         assertEq(clearingHouse.getAccountPositions(CHARLIE_ACCOUNT).length, 1);
 
-        // Settle VM for all
-        ClearingHouse.VMSettlement[] memory settlements = new ClearingHouse.VMSettlement[](3);
-        settlements[0] = ClearingHouse.VMSettlement(ALICE_ACCOUNT, int256(5_000e6));
-        settlements[1] = ClearingHouse.VMSettlement(BOB_ACCOUNT, int256(3_000e6));
-        settlements[2] = ClearingHouse.VMSettlement(CHARLIE_ACCOUNT, -int256(8_000e6));
+        // Settle VM for each position using batch settlement
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](2);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId1, npvChange: int256(5_000e6)});
+        settlements[1] = IClearingHouse.VMSettlement({tradeId: tradeId2, npvChange: int256(3_000e6)});
 
         vm.prank(settler);
-        clearingHouse.settleVM(settlements);
+        clearingHouse.settleVariationMarginBatch(settlements);
 
-        // Verify balances updated
+        // Verify balances updated (net effect)
         assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), 2_000_000e6 + 5_000e6);
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), 2_000_000e6 + 3_000e6);
-        assertEq(marginVault.getTotalCollateral(CHARLIE_ACCOUNT), 2_000_000e6 - 8_000e6);
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), 2_000_000e6 + 5_000e6 + 3_000e6);
+        assertEq(marginVault.getTotalCollateral(CHARLIE_ACCOUNT), 2_000_000e6 - 3_000e6);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -336,7 +336,7 @@ contract ClearingHouseIntegrationTest is Test {
         uint256 notional,
         uint256 nonce
     ) internal {
-        ClearingHouse.MatchedTrade memory trade = ClearingHouse.MatchedTrade({
+        IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
             tradeId: tradeId,
             partyA: partyA,
             partyB: partyB,
@@ -362,7 +362,7 @@ contract ClearingHouseIntegrationTest is Test {
         clearingHouse.submitMatchedTrade(trade, sigA, sigB);
     }
 
-    function _getWalletForAccount(bytes32 accountId) internal returns (Vm.Wallet memory) {
+    function _getWalletForAccount(bytes32 accountId) internal view returns (Vm.Wallet memory) {
         if (accountId == ALICE_ACCOUNT) return aliceWallet;
         if (accountId == BOB_ACCOUNT) return bobWallet;
         if (accountId == CHARLIE_ACCOUNT) return charlieWallet;
@@ -370,7 +370,7 @@ contract ClearingHouseIntegrationTest is Test {
     }
 
     function _signTrade(
-        ClearingHouse.MatchedTrade memory trade,
+        IClearingHouse.MatchedTrade memory trade,
         Vm.Wallet memory wallet
     ) internal returns (bytes memory) {
         bytes32 structHash = keccak256(

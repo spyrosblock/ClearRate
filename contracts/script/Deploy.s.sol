@@ -6,7 +6,6 @@ import {ClearRateScript} from "./ClearRateScript.sol";
 import {Whitelist} from "../src/access/Whitelist.sol";
 import {MarginVault} from "../src/margin/MarginVault.sol";
 import {RiskEngine} from "../src/margin/RiskEngine.sol";
-import {YieldCurveOracle} from "../src/oracles/YieldCurveOracle.sol";
 import {IRSInstrument} from "../src/core/IRSInstrument.sol";
 import {ClearingHouse} from "../src/core/ClearingHouse.sol";
 import {InsuranceFund} from "../src/insurance/InsuranceFund.sol";
@@ -66,17 +65,17 @@ contract Deploy is ClearRateScript {
         vm.startBroadcast(deployer);
 
         // 1. Deploy Whitelist
-        console.log("\n[1/8] Deploying Whitelist...");
+        console.log("\n[1/7] Deploying Whitelist...");
         Whitelist whitelist = new Whitelist(deployer);
         logDeployment("Whitelist", address(whitelist));
 
         // 2. Deploy MarginVault
-        console.log("\n[2/8] Deploying MarginVault...");
+        console.log("\n[2/7] Deploying MarginVault...");
         MarginVault marginVault = new MarginVault(deployer, address(whitelist), tokens);
         logDeployment("MarginVault", address(marginVault));
 
         // 3. Deploy RiskEngine
-        console.log("\n[3/8] Deploying RiskEngine...");
+        console.log("\n[3/7] Deploying RiskEngine...");
         RiskEngine riskEngine = new RiskEngine(
             deployer,
             address(marginVault),
@@ -85,43 +84,33 @@ contract Deploy is ClearRateScript {
         );
         logDeployment("RiskEngine", address(riskEngine));
 
-        // 4. Deploy YieldCurveOracle
-        console.log("\n[4/8] Deploying YieldCurveOracle...");
-        YieldCurveOracle oracle = new YieldCurveOracle(
-            getChainlinkForwarder(),
-            MAX_STALENESS,
-            tenors
-        );
-        logDeployment("YieldCurveOracle", address(oracle));
-
-        // 5. Deploy IRSInstrument
-        console.log("\n[5/8] Deploying IRSInstrument...");
+        // 4. Deploy IRSInstrument
+        console.log("\n[4/7] Deploying IRSInstrument...");
         IRSInstrument instrument = new IRSInstrument(
             deployer,
             "https://metadata.clearrate.io/{id}.json"
         );
         logDeployment("IRSInstrument", address(instrument));
 
-        // 6. Deploy ClearingHouse
-        console.log("\n[6/8] Deploying ClearingHouse...");
+        // 5. Deploy ClearingHouse
+        console.log("\n[5/7] Deploying ClearingHouse...");
         ClearingHouse clearingHouse = new ClearingHouse(
             deployer,
             getChainlinkForwarder(),
             address(instrument),
             address(marginVault),
             address(riskEngine),
-            address(whitelist),
-            address(oracle)
+            address(whitelist)
         );
         logDeployment("ClearingHouse", address(clearingHouse));
 
-        // 7. Deploy InsuranceFund
-        console.log("\n[7/8] Deploying InsuranceFund...");
+        // 6. Deploy InsuranceFund
+        console.log("\n[6/7] Deploying InsuranceFund...");
         InsuranceFund insuranceFund = new InsuranceFund(deployer, tokens);
         logDeployment("InsuranceFund", address(insuranceFund));
 
-        // 8. Deploy LiquidationEngine
-        console.log("\n[8/8] Deploying LiquidationEngine...");
+        // 7. Deploy LiquidationEngine
+        console.log("\n[7/7] Deploying LiquidationEngine...");
         LiquidationEngine liquidationEngine = new LiquidationEngine(
             deployer,
             address(riskEngine),
@@ -177,8 +166,8 @@ contract Deploy is ClearRateScript {
         //  DEPLOYMENT SUMMARY
         // ═══════════════════════════════════════════════════════════════
 
-        string[] memory names = new string[](8);
-        address[] memory addrs = new address[](8);
+        string[] memory names = new string[](7);
+        address[] memory addrs = new address[](7);
 
         names[0] = "Whitelist";
         addrs[0] = address(whitelist);
@@ -186,16 +175,14 @@ contract Deploy is ClearRateScript {
         addrs[1] = address(marginVault);
         names[2] = "RiskEngine";
         addrs[2] = address(riskEngine);
-        names[3] = "YieldCurveOracle";
-        addrs[3] = address(oracle);
-        names[4] = "IRSInstrument";
-        addrs[4] = address(instrument);
-        names[5] = "ClearingHouse";
-        addrs[5] = address(clearingHouse);
-        names[6] = "InsuranceFund";
-        addrs[6] = address(insuranceFund);
-        names[7] = "LiquidationEngine";
-        addrs[7] = address(liquidationEngine);
+        names[3] = "IRSInstrument";
+        addrs[3] = address(instrument);
+        names[4] = "ClearingHouse";
+        addrs[4] = address(clearingHouse);
+        names[5] = "InsuranceFund";
+        addrs[5] = address(insuranceFund);
+        names[6] = "LiquidationEngine";
+        addrs[6] = address(liquidationEngine);
 
         logAllDeployments(names, addrs);
 

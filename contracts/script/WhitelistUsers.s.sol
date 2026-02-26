@@ -130,7 +130,7 @@ contract WhitelistUsers is Script {
 
     /// @notice Get the deployer address from the PRIVATE_KEY or DEPLOYER_PRIVATE_KEY environment variable.
     /// @return deployer The deployer address derived from the private key.
-    function getDeployer() internal returns (address deployer) {
+    function getDeployer() internal view returns (address deployer) {
         string memory privateKeyStr = vm.envString("DEPLOYER_PRIVATE_KEY");
         
         if (bytes(privateKeyStr).length >= 2) {

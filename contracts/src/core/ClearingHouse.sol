@@ -5,18 +5,18 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IClearingHouse} from "../interfaces/IClearingHouse.sol";
 import {IRSInstrument} from "./IRSInstrument.sol";
 import {MarginVault} from "../margin/MarginVault.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
 import {Whitelist} from "../access/Whitelist.sol";
-import {YieldCurveOracle} from "../oracles/YieldCurveOracle.sol";
 import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 
 /// @title ClearingHouse
 /// @notice Central coordinator for IRS trade novation, VM settlement, and position compression.
 /// @dev Implements EIP-712 for gas-free matched trade submission and signature verification.
 ///      Inherits from ReceiverTemplate to receive reports from Chainlink CRE workflow.
-contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTemplate {
+contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTemplate, IClearingHouse {
     using ECDSA for bytes32;
 
     // ─── Constants ──────────────────────────────────────────────────────
@@ -28,45 +28,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline)"
     );
 
-    // ─── Structs ────────────────────────────────────────────────────────
-
-    /// @notice A matched trade agreement signed by both parties.
-    struct MatchedTrade {
-        bytes32 tradeId;            // Unique trade identifier
-        bytes32 partyA;             // AccountId of party A (pays fixed)
-        bytes32 partyB;             // AccountId of party B (receives fixed)
-        uint256 notional;           // Notional amount
-        uint256 fixedRateBps;       // Fixed rate in basis points
-        uint256 startDate;          // Swap effective date
-        uint256 maturityDate;       // Swap maturity date
-        uint256 paymentInterval;    // Payment frequency in seconds
-        uint8 dayCountConvention;   // Day-count convention
-        bytes32 floatingRateIndex;  // Floating rate index identifier
-        uint256 nonce;              // Replay protection nonce
-        uint256 deadline;           // Signature validity deadline
-    }
-
-    /// @notice A novated position record.
-    struct NovatedPosition {
-        bytes32 tradeId;
-        uint256 tokenIdA;           // ERC-1155 token ID for party A's leg
-        uint256 tokenIdB;           // ERC-1155 token ID for party B's leg
-        bytes32 partyA;
-        bytes32 partyB;
-        uint256 notional;           // Current notional (may be reduced after compression)
-        uint256 originalNotional;   // Original notional at novation (for correct token burn)
-        uint256 fixedRateBps;
-        uint256 startDate;
-        uint256 maturityDate;
-        bool active;
-        int256 lastNpv;             // Last mark-to-market NPV
-    }
-
-    /// @notice Variation margin settlement batch entry.
-    struct VMSettlement {
-        bytes32 accountId;
-        int256 vmAmount;            // Signed VM amount (positive = credit)
-    }
+    // ─── Struct Aliases ─────────────────────────────────────────────────
+    // Using IClearingHouse structs directly via inheritance
 
     // ─── State ──────────────────────────────────────────────────────────
 
@@ -75,7 +38,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     MarginVault public immutable marginVault;
     RiskEngine public immutable riskEngine;
     Whitelist public immutable whitelist;
-    YieldCurveOracle public immutable oracle;
 
     /// @notice Novated positions indexed by tradeId.
     mapping(bytes32 => NovatedPosition) public positions;
@@ -99,46 +61,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     address public feeRecipient;
 
     // ─── Events ─────────────────────────────────────────────────────────
-    event TradeSubmitted(
-        bytes32 indexed tradeId,
-        bytes32 indexed partyA,
-        bytes32 indexed partyB,
-        uint256 notional,
-        uint256 fixedRateBps
-    );
-    event TradeNovated(
-        bytes32 indexed tradeId,
-        uint256 tokenIdA,
-        uint256 tokenIdB
-    );
-    event VariationMarginSettled(
-        bytes32 indexed tradeId,
-        int256 npvChange,
-        uint256 timestamp
-    );
-    event PositionCompressed(
-        bytes32 indexed accountId,
-        bytes32 indexed tradeIdA,
-        bytes32 indexed tradeIdB,
-        uint256 notionalReduced
-    );
-    event PositionMatured(bytes32 indexed tradeId, uint256 timestamp);
-    event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+    // Events inherited from IClearingHouse
 
     // ─── Errors ─────────────────────────────────────────────────────────
-    error TradeAlreadySubmitted(bytes32 tradeId);
-    error InvalidSignature(bytes32 accountId);
-    error SignatureExpired(uint256 deadline);
-    error NonceAlreadyUsed(bytes32 accountId, uint256 nonce);
-    error PartyNotWhitelisted(bytes32 accountId);
-    error InsufficientMarginForTrade(bytes32 accountId);
-    error PositionNotActive(bytes32 tradeId);
-    error PositionNotMatured(bytes32 tradeId);
-    error InvalidNotional();
-    error InvalidTradeTerms();
-    error NotPartyToTrade(bytes32 accountId, bytes32 tradeId);
-    error PositionsNotCompressible();
-    error InvalidReportType(uint8 reportType);
+    // Errors inherited from IClearingHouse
 
     // ─── Constructor ────────────────────────────────────────────────────
 
@@ -149,15 +75,13 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @param marginVault_ The MarginVault contract.
     /// @param riskEngine_ The RiskEngine contract.
     /// @param whitelist_ The Whitelist contract.
-    /// @param oracle_ The YieldCurveOracle contract.
     constructor(
         address admin,
         address forwarder,
         address instrument_,
         address marginVault_,
         address riskEngine_,
-        address whitelist_,
-        address oracle_
+        address whitelist_
     ) EIP712("ClearRate CCP", "1") ReceiverTemplate(forwarder) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, admin);
@@ -167,7 +91,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         marginVault = MarginVault(marginVault_);
         riskEngine = RiskEngine(riskEngine_);
         whitelist = Whitelist(whitelist_);
-        oracle = YieldCurveOracle(oracle_);
     }
 
     // ─── Trade Submission ───────────────────────────────────────────────
@@ -186,34 +109,22 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     // ─── Variation Margin Settlement ────────────────────────────────────
 
+    /// @param tradeId The unique identifier of the position to settle.
+    /// @param npvChange The NPV change from the fixed payer's perspective.
+    function settleVariationMarginSinglePosition(
+        bytes32 tradeId,
+        int256 npvChange
+    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
+        _settleVariationMargin(tradeId, npvChange);
+    }
+
     /// @notice Settle variation margin for a batch of positions.
     /// @dev Called by a keeper or CRE workflow with fresh NPV calculations.
     /// @param settlements Array of VM settlement entries.
-    function settleVM(
+    function settleVariationMarginBatch(
         VMSettlement[] calldata settlements
     ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
         _executeVMSettlement(settlements);
-    }
-    
-    /// @param tradeId The unique identifier of the position to settle.
-    /// @param newNpv The new NPV from the fixed payer's perspective.
-    function settlePositionVM(
-        bytes32 tradeId,
-        int256 newNpv
-    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
-        NovatedPosition storage pos = positions[tradeId];
-        if (!pos.active) revert PositionNotActive(tradeId);
-
-        int256 npvChange = newNpv - pos.lastNpv;
-        pos.lastNpv = newNpv;
-
-        // Party A is the fixed payer: positive NPV change benefits A, debits B
-        if (npvChange != 0) {
-            marginVault.settleVariationMargin(pos.partyA, npvChange);
-            marginVault.settleVariationMargin(pos.partyB, -npvChange);
-        }
-
-        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
     }
 
     // ─── Position Compression ───────────────────────────────────────────
@@ -276,12 +187,37 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     /// @notice Settle a matured position and release locked margin.
     /// @param tradeId The trade that has matured.
+    /// @param finalNpvChange The final NPV change to settle (from fixed payer's perspective).
     function settleMaturedPosition(
-        bytes32 tradeId
+        bytes32 tradeId,
+        int256 finalNpvChange
     ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        _settleSingleMaturedPosition(tradeId, finalNpvChange);
+    }
+
+    /// @notice Settle multiple matured positions in a batch.
+    /// @param settlements Array of matured position settlement entries.
+    function settleMaturedPositionsBatch(
+        MaturedPositionSettlement[] calldata settlements
+    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
+        _executeMaturedPositionSettlement(settlements);
+    }
+
+    /// @dev Settle a single matured position and release locked margin.
+    /// @param tradeId The trade that has matured.
+    /// @param finalNpvChange The final NPV change to settle (from fixed payer's perspective).
+    function _settleSingleMaturedPosition(
+        bytes32 tradeId,
+        int256 finalNpvChange
+    ) internal {
         NovatedPosition storage pos = positions[tradeId];
         if (!pos.active) revert PositionNotActive(tradeId);
         if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
+
+        // Settle final variation margin before closing position
+        if (finalNpvChange != 0) {
+            _settleVariationMargin(tradeId, finalNpvChange);
+        }
 
         pos.active = false;
         --activePositionCount;
@@ -330,9 +266,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     /// @notice Process the report data from Chainlink CRE.
     /// @dev Called by ReceiverTemplate.onReport() after validation.
-    ///      Supports two report types:
+    ///      Supports three report types:
     ///      1. Trade submission: abi.encode(uint8(0), matchedTrade, sigA, sigB)
     ///      2. VM settlement: abi.encode(uint8(1), VMSettlement[])
+    ///      3. Matured position settlement: abi.encode(uint8(2), MaturedPositionSettlement[])
     /// @param report ABI-encoded report data with type prefix
     function _processReport(
         bytes calldata report
@@ -356,6 +293,14 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
                 (uint8, VMSettlement[])
             );
             _executeVMSettlement(settlements);
+        } else if (reportType == 2) {
+            // Matured position settlement batch report
+            // Decode: (uint8, MaturedPositionSettlement[] settlements)
+            (, MaturedPositionSettlement[] memory settlements) = abi.decode(
+                report,
+                (uint8, MaturedPositionSettlement[])
+            );
+            _executeMaturedPositionSettlement(settlements);
         } else {
             revert InvalidReportType(reportType);
         }
@@ -441,16 +386,47 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     }
 
 
-    /// @dev Execute VM settlement for a batch of positions.
-    /// @param settlements Array of VM settlement entries.
+    /// @dev Execute VM settlement for a batch of positions by trade.
+    /// @param settlements Array of VM settlement entries (tradeId + npvChange).
     function _executeVMSettlement(
         VMSettlement[] memory settlements
     ) internal {
         for (uint256 i; i < settlements.length; ++i) {
-            marginVault.settleVariationMargin(
-                settlements[i].accountId,
-                settlements[i].vmAmount
-            );
+            VMSettlement memory settlement = settlements[i];
+            _settleVariationMargin(settlement.tradeId, settlement.npvChange);
+        }
+    }
+
+    /// @dev Settle variation margin for a single position by tradeId.
+    /// @param tradeId The unique identifier of the position to settle.
+    /// @param npvChange The NPV change from the fixed payer's perspective.
+    function _settleVariationMargin(
+        bytes32 tradeId,
+        int256 npvChange
+    ) internal {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+
+        pos.lastNpv += npvChange;
+
+        // Party A is the fixed payer: positive npvChange benefits A, debits B
+        if (npvChange != 0) {
+            marginVault.settleVariationMargin(pos.partyA, npvChange);
+            marginVault.settleVariationMargin(pos.partyB, -npvChange);
+        }
+
+        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
+    }
+
+
+    /// @dev Execute matured position settlement for a batch of positions.
+    /// @param settlements Array of matured position settlement entries.
+    function _executeMaturedPositionSettlement(
+        MaturedPositionSettlement[] memory settlements
+    ) internal {
+        for (uint256 i; i < settlements.length; ++i) {
+            MaturedPositionSettlement memory settlement = settlements[i];
+            _settleSingleMaturedPosition(settlement.tradeId, settlement.finalNpvChange);
         }
     }
 

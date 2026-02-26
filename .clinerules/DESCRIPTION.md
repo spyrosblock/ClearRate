@@ -194,7 +194,6 @@ cre workflow simulate . --target staging-settings --broadcast
 │   ├── config.staging.json         # Staging configuration
 │   ├── config.production.json      # Production configuration
 │   ├── workflow.yaml               # Workflow definition
-│   ├── vm-settlement-example.json  # Example settlement payload
 │   └── README.md                    # Workflow documentation
 │
 ├── create-trade-workflow/           # Chainlink CRE workflow (Trade creation)

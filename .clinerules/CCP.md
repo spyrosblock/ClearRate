@@ -106,8 +106,8 @@ Example for how it's supposed to work
 4. Users deposit collateral: `cd contracts && make deposit-margin-sepolia && cd ..`
 5. Create a trade and user signatures: `cd contracts && make create-trade-sepolia && cd ..`
 6. Call the cre api to create the swap: `cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/trade.json)" --non-interactive --trigger-index 0`
-7. Settle the variation margin for all positions daily: `cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm-workflow --target staging-settings --broadcast`
-8. The user can withdraw their collateral after the trade is settled: `cd contracts && make withdraw-margin-sepolia && cd ..`
+7. Settle the variation margin for all positions daily (if the endDate of the trade is in the past and the trade is active, the trade gets "matured"): `cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm-workflow --target staging-settings --broadcast`
+9. The user can withdraw their collateral after the trade is settled: `cd contracts && make withdraw-margin-sepolia && cd ..`
 
 
 Read commands:
