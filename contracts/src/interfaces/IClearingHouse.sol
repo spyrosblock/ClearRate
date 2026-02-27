@@ -21,6 +21,7 @@ interface IClearingHouse {
         bytes32 floatingRateIndex; // Floating rate index identifier
         uint256 nonce;             // Replay protection nonce
         uint256 deadline;          // Signature validity deadline
+        address collateralToken;   // Single collateral token for IM and VM
     }
 
     /// @notice A novated position record.
@@ -37,6 +38,7 @@ interface IClearingHouse {
         uint256 maturityDate;
         bool active;
         int256 lastNpv;             // Last mark-to-market NPV
+        address collateralToken;    // Single collateral token for IM and VM
     }
 
     /// @notice Variation margin settlement batch entry.
@@ -63,7 +65,17 @@ interface IClearingHouse {
     event TradeNovated(
         bytes32 indexed tradeId,
         uint256 tokenIdA,
-        uint256 tokenIdB
+        uint256 tokenIdB,
+        bytes32 indexed partyA,
+        bytes32 indexed partyB,
+        uint256 notional,
+        uint256 fixedRateBps,
+        uint256 startDate,
+        uint256 maturityDate,
+        uint256 paymentInterval,
+        uint8 dayCountConvention,
+        bytes32 floatingRateIndex,
+        address collateralToken
     );
     event VariationMarginSettled(
         bytes32 indexed tradeId,
@@ -94,4 +106,5 @@ interface IClearingHouse {
     error NotPartyToTrade(bytes32 accountId, bytes32 tradeId);
     error PositionsNotCompressible();
     error InvalidReportType(uint8 reportType);
+    error InvalidCollateralToken(address token);
 }

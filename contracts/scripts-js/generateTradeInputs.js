@@ -79,7 +79,8 @@ async function main() {
       { name: "dayCountConvention", type: "uint8" },
       { name: "floatingRateIndex", type: "bytes32" },
       { name: "nonce", type: "uint256" },
-      { name: "deadline", type: "uint256" }
+      { name: "deadline", type: "uint256" },
+      { name: "collateralToken", type: "address" }
     ]
   };
 
@@ -117,6 +118,9 @@ async function main() {
   // Deadline for signature validity (24 hours from startDate)
   const deadline = startDate + 24 * 60 * 60;
 
+  // Collateral token address
+  const collateralToken = env.MOCK_COLLATERAL_TOKEN;
+
   // ─── Build the Trade Struct ───────────────────────────────────────────
 
   const matchedTrade = {
@@ -131,7 +135,8 @@ async function main() {
     dayCountConvention,
     floatingRateIndex,
     nonce,
-    deadline
+    deadline,
+    collateralToken
   };
 
   // ─── Generate Signatures ─────────────────────────────────────────────
@@ -165,7 +170,8 @@ async function main() {
       dayCountConvention: matchedTrade.dayCountConvention,
       floatingRateIndex: matchedTrade.floatingRateIndex,
       nonce: matchedTrade.nonce,
-      deadline: matchedTrade.deadline
+      deadline: matchedTrade.deadline,
+      collateralToken: matchedTrade.collateralToken
     },
     
     // EIP-712 signatures

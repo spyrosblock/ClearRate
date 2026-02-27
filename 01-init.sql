@@ -16,6 +16,7 @@ CREATE TABLE novated_positions (
     maturity_date   TIMESTAMPTZ NOT NULL,                  -- Swap maturity date
     active          BOOLEAN DEFAULT TRUE,                  -- Position active status
     last_npv        NUMERIC(78, 0) DEFAULT 0,              -- Last mark-to-market NPV (int256)
+    collateral_token VARCHAR(42) NOT NULL,                  -- Single collateral token address for IM and VM
     created_at      TIMESTAMPTZ DEFAULT NOW(),            -- Record creation timestamp
     updated_at      TIMESTAMPTZ DEFAULT NOW()             -- Last update timestamp
 );

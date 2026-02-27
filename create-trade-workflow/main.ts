@@ -46,6 +46,7 @@ const tradePayloadSchema = z.object({
 		floatingRateIndex: z.string(),
 		nonce: z.number(),
 		deadline: z.number(),
+		collateralToken: z.string(),
 	}),
 	sigA: z.string(),
 	sigB: z.string(),
@@ -123,6 +124,7 @@ const submitTradeToClearingHouse = (
 	runtime.log(`  Floating Rate Index: ${trade.floatingRateIndex}`)
 	runtime.log(`  Nonce: ${trade.nonce}`)
 	runtime.log(`  Deadline: ${new Date(trade.deadline * 1000).toISOString()}`)
+	runtime.log(`  Collateral Token: ${trade.collateralToken}`)
 
 	// Create the trade object that matches the tuple structure
 	const tradeData = {
@@ -138,6 +140,7 @@ const submitTradeToClearingHouse = (
 		floatingRateIndex: toBytes32(trade.floatingRateIndex),
 		nonce: BigInt(trade.nonce),
 		deadline: BigInt(trade.deadline),
+		collateralToken: trade.collateralToken as `0x${string}`,
 	}
 
 	// Convert tradeData object to positional array matching the tuple order
@@ -154,13 +157,14 @@ const submitTradeToClearingHouse = (
 		tradeData.floatingRateIndex,
 		tradeData.nonce,
 		tradeData.deadline,
+		tradeData.collateralToken,
 	];
 
 	// Encode the full report with report type prefix: abi.encode(uint8(0), trade, sigA, sigB)
 	// ReportType = 0 indicates trade submission
 	// This matches the contract's expected format in _processReport()
 	const fullAbiParams = parseAbiParameters(
-		'uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes',
+		'uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256,address),bytes,bytes',
 	)
 	const callData = encodeAbiParameters(fullAbiParams, [
 		BigInt(0), // Report type: 0 = trade submission

@@ -5,16 +5,13 @@ import {
 	EVMLog,
 	getNetwork,
 	hexToBase64,
-	LAST_FINALIZED_BLOCK_NUMBER,
 	Runner,
 	type Runtime,
 	type HTTPSendRequester,
 	ok,
 } from '@chainlink/cre-sdk'
-import { decodeEventLog, decodeFunctionResult, encodeFunctionData, parseAbi, zeroAddress } from 'viem'
+import { decodeEventLog, parseAbi } from 'viem'
 import { z } from 'zod'
-import './abi'
-import { ClearingHouseABI } from './abi/ClearingHouse'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
 
@@ -40,26 +37,6 @@ type PostResponse = {
 	message?: string
 }
 
-// ─── Position Data from Contract ─────────────────────────────────────────
-
-/**
- * Position data structure matching the NovatedPosition struct from ClearingHouse.
- */
-interface PositionData {
-	tradeId: string
-	tokenIdA: string
-	tokenIdB: string
-	partyA: string
-	partyB: string
-	notional: string
-	originalNotional: string
-	fixedRateBps: string
-	startDate: string
-	maturityDate: string
-	active: boolean
-	lastNpv: string
-}
-
 // ─── Database Payload Types ───────────────────────────────────────────────
 
 type NovatedPositionPayload = {
@@ -76,6 +53,7 @@ type NovatedPositionPayload = {
 	maturityDate: string
 	active: boolean
 	lastNpv: string
+	collateralToken: string
 }
 
 type PositionMaturedPayload = {
@@ -87,130 +65,11 @@ type DatabasePayload = NovatedPositionPayload | PositionMaturedPayload
 
 // ─── Event ABI Parsing ───────────────────────────────────────────────────
 
+// Full event ABI matching the IClearingHouse.sol contract
 const eventAbi = parseAbi([
-	'event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB)',
+	'event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)',
 	'event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)',
 ])
-
-// ─── Read Position from Blockchain ─────────────────────────────────────────
-
-/**
- * Read a position from the ClearingHouse contract by tradeId.
- * This is needed to get the full position details after a TradeNovated event.
- */
-const readPositionById = (
-	runtime: Runtime<Config>,
-	evmConfig: Config['evms'][0],
-	tradeId: string,
-): PositionData | null => {
-	const network = getNetwork({
-		chainFamily: 'evm',
-		chainSelectorName: evmConfig.chainSelectorName,
-		isTestnet: true,
-	})
-
-	if (!network) {
-		throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`)
-	}
-
-	const evmClient = new cre.capabilities.EVMClient(network.chainSelector.selector)
-
-	// Full ABI with getPosition function
-	const fullAbi = [
-		{
-			inputs: [{ name: 'tradeId', type: 'bytes32' }],
-			name: 'getPosition',
-			outputs: [
-				{
-					components: [
-						{ name: 'tradeId', type: 'bytes32' },
-						{ name: 'tokenIdA', type: 'uint256' },
-						{ name: 'tokenIdB', type: 'uint256' },
-						{ name: 'partyA', type: 'bytes32' },
-						{ name: 'partyB', type: 'bytes32' },
-						{ name: 'notional', type: 'uint256' },
-						{ name: 'originalNotional', type: 'uint256' },
-						{ name: 'fixedRateBps', type: 'uint256' },
-						{ name: 'startDate', type: 'uint256' },
-						{ name: 'maturityDate', type: 'uint256' },
-						{ name: 'active', type: 'bool' },
-						{ name: 'lastNpv', type: 'int256' },
-					],
-					internalType: 'struct IClearingHouse.NovatedPosition',
-					name: '',
-					type: 'tuple',
-				},
-			],
-			stateMutability: 'view',
-			type: 'function',
-		},
-	] as const
-
-	// Encode the contract call data for getPosition
-	const callData = encodeFunctionData({
-		abi: fullAbi,
-		functionName: 'getPosition',
-		args: [tradeId as `0x${string}`],
-	})
-
-	const contractCall = evmClient
-		.callContract(runtime, {
-			call: {
-				from: zeroAddress,
-				to: evmConfig.clearingHouseAddress as `0x${string}`,
-				data: callData,
-			},
-			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-		})
-		.result()
-
-	// Check if the call returned empty data
-	const callDataHex = bytesToHex(contractCall.data)
-	if (!callDataHex || callDataHex === '0x') {
-		runtime.log(`Warning: Contract call returned empty data for tradeId ${tradeId}`)
-		return null
-	}
-
-	// Decode the result using decodeFunctionResult instead of decodeEventLog
-	const result = decodeFunctionResult({
-		abi: fullAbi,
-		functionName: 'getPosition',
-		data: callDataHex,
-	}) as {
-		tradeId: `0x${string}`
-		tokenIdA: bigint
-		tokenIdB: bigint
-		partyA: `0x${string}`
-		partyB: `0x${string}`
-		notional: bigint
-		originalNotional: bigint
-		fixedRateBps: bigint
-		startDate: bigint
-		maturityDate: bigint
-		active: boolean
-		lastNpv: bigint
-	}
-
-	// Check if position exists (tradeId will be empty if not found)
-	if (!result || result.tradeId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
-		return null
-	}
-
-	return {
-		tradeId: result.tradeId,
-		tokenIdA: result.tokenIdA.toString(),
-		tokenIdB: result.tokenIdB.toString(),
-		partyA: result.partyA,
-		partyB: result.partyB,
-		notional: result.notional.toString(),
-		originalNotional: result.originalNotional.toString(),
-		fixedRateBps: result.fixedRateBps.toString(),
-		startDate: result.startDate.toString(),
-		maturityDate: result.maturityDate.toString(),
-		active: result.active,
-		lastNpv: result.lastNpv.toString(),
-	}
-}
 
 // ─── Database API Communication ───────────────────────────────────────────
 
@@ -278,66 +137,48 @@ const onLogTrigger = (runtime: Runtime<Config>, log: EVMLog): string => {
 	runtime.log(`Event name: ${eventName}`)
 
 	const httpClient = new cre.capabilities.HTTPClient()
-	const evmConfig = runtime.config.evms[0]
 
 	// Process based on event type
 	if (eventName === 'TradeNovated') {
-		const args = decodedLog.args as { tradeId: `0x${string}`; tokenIdA: bigint; tokenIdB: bigint }
-		const { tradeId, tokenIdA, tokenIdB } = args
+		// Extract all fields from the event (no blockchain reading needed)
+		const args = decodedLog.args as {
+			tradeId: `0x${string}`
+			tokenIdA: bigint
+			tokenIdB: bigint
+			partyA: `0x${string}`
+			partyB: `0x${string}`
+			notional: bigint
+			fixedRateBps: bigint
+			startDate: bigint
+			maturityDate: bigint
+			paymentInterval: bigint
+			dayCountConvention: number
+			floatingRateIndex: `0x${string}`
+			collateralToken: `0x${string}`
+		}
+		const { tradeId, tokenIdA, tokenIdB, partyA, partyB, notional, fixedRateBps, startDate, maturityDate, collateralToken } = args
 
 		runtime.log(
-			`Event TradeNovated detected: tradeId ${tradeId} | tokenIdA ${tokenIdA} | tokenIdB ${tokenIdB}`,
+			`Event TradeNovated detected: tradeId ${tradeId} | tokenIdA ${tokenIdA} | tokenIdB ${tokenIdB} | partyA ${partyA} | partyB ${partyB} | collateralToken ${collateralToken}`,
 		)
 
-		// Read full position data from the contract
-		const position = readPositionById(runtime, evmConfig, tradeId)
-
-		if (!position) {
-			runtime.log(`Warning: Could not read position for tradeId ${tradeId}`)
-			// Still try to store with basic info
-			const payload: NovatedPositionPayload = {
-				action: 'TradeNovated',
-				tradeId,
-				tokenIdA: tokenIdA.toString(),
-				tokenIdB: tokenIdB.toString(),
-				partyA: '0x0000000000000000000000000000000000000000000000000000000000000000',
-				partyB: '0x0000000000000000000000000000000000000000000000000000000000000000',
-				notional: '0',
-				originalNotional: '0',
-				fixedRateBps: '0',
-				startDate: '0',
-				maturityDate: '0',
-				active: true,
-				lastNpv: '0',
-			}
-
-			const result = httpClient
-				.sendRequest(
-					runtime,
-					(sendRequester, config) => postToDatabase(sendRequester, config as Config, payload),
-					consensusIdenticalAggregation<PostResponse>(),
-				)(runtime.config)
-				.result()
-
-			runtime.log(`Stored novated trade with limited data. Status: ${result.statusCode}`)
-			return 'Success'
-		}
-
-		// Prepare the full payload with position data
+		// Prepare the payload with data from the event
+		// Note: originalNotional equals notional at novation time, lastNpv is 0 as it's calculated later
 		const payload: NovatedPositionPayload = {
 			action: 'TradeNovated',
-			tradeId: position.tradeId,
-			tokenIdA: position.tokenIdA,
-			tokenIdB: position.tokenIdB,
-			partyA: position.partyA,
-			partyB: position.partyB,
-			notional: position.notional,
-			originalNotional: position.originalNotional,
-			fixedRateBps: position.fixedRateBps,
-			startDate: position.startDate,
-			maturityDate: position.maturityDate,
-			active: position.active,
-			lastNpv: position.lastNpv,
+			tradeId,
+			tokenIdA: tokenIdA.toString(),
+			tokenIdB: tokenIdB.toString(),
+			partyA,
+			partyB,
+			notional: notional.toString(),
+			originalNotional: notional.toString(), // At novation, originalNotional = notional
+			fixedRateBps: fixedRateBps.toString(),
+			startDate: startDate.toString(),
+			maturityDate: maturityDate.toString(),
+			active: true,
+			lastNpv: '0', // Will be calculated by subsequent events
+			collateralToken,
 		}
 
 		runtime.log(`Storing novated position: ${JSON.stringify(payload)}`)

@@ -168,7 +168,8 @@ contract ClearingHouseIntegrationTest is Test {
             dayCountConvention: 0,
             floatingRateIndex: SOFR_INDEX,
             nonce: 1,
-            deadline: block.timestamp + 1 hours
+            deadline: block.timestamp + 1 hours,
+            collateralToken: address(usdc)
         });
 
         bytes memory sigA = _signTrade(trade, aliceWallet);
@@ -348,7 +349,8 @@ contract ClearingHouseIntegrationTest is Test {
             dayCountConvention: 0,
             floatingRateIndex: SOFR_INDEX,
             nonce: nonce,
-            deadline: block.timestamp + 1 hours
+            deadline: block.timestamp + 1 hours,
+            collateralToken: address(usdc)
         });
 
         // Get the wallets for signing based on account
@@ -380,7 +382,7 @@ contract ClearingHouseIntegrationTest is Test {
                 trade.notional, trade.fixedRateBps,
                 trade.startDate, trade.maturityDate, trade.paymentInterval,
                 trade.dayCountConvention, trade.floatingRateIndex,
-                trade.nonce, trade.deadline
+                trade.nonce, trade.deadline, trade.collateralToken
             )
         );
         bytes32 digest = MessageHashUtils.toTypedDataHash(_domainSeparator(), structHash);

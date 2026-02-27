@@ -325,7 +325,7 @@ const writeVMSettlement = (
 	
 	// TODO remove this testing line in prod
 	// the api returns positions with isFinal set to false so for testing purposes:
-	payload.settlements.forEach(s => s.isFinal = true);
+	// payload.settlements.forEach(s => s.isFinal = true);
 
 	// Separate settlements into VM (regular) and matured (final) based on isFinal flag
 	const vmSettlements = payload.settlements.filter((s) => !s.isFinal)

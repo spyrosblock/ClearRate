@@ -36,8 +36,11 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     /// @notice Per-account per-token collateral breakdown.
     mapping(bytes32 => mapping(address => uint256)) public tokenCollateral;
 
-    /// @notice Signed variation margin balance (positive = credit, negative = debit).
-    mapping(bytes32 => int256) public vmBalanceSigned;
+    /// @notice Signed variation margin balance per token (positive = credit, negative = debit).
+    mapping(bytes32 => mapping(address => int256)) public vmBalanceSigned;
+
+    /// @notice Per-account per-token locked initial margin.
+    mapping(bytes32 => mapping(address => uint256)) public lockedIMByToken;
 
     /// @notice Accepted stablecoin tokens.
     mapping(address => bool) public acceptedTokens;
@@ -158,62 +161,84 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         emit MarginWithdrawn(accountId, token, amount);
     }
 
-    /// @notice Lock initial margin for a new position.
-    /// @param accountId The  account identifier.
+    /// @notice Lock initial margin for a new position with a specific token.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token to lock.
     /// @param amount The amount to lock.
     function lockInitialMargin(
         bytes32 accountId,
+        address token,
         uint256 amount
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         if (amount == 0) revert ZeroAmount();
+        if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
         MarginAccount storage account = marginAccounts[accountId];
         if (!account.exists) revert AccountNotInitialized(accountId);
 
-        uint256 free = getFreeMargin(accountId);
-        if (amount > free) {
-            revert InsufficientFreeMargin(accountId, amount, free);
+        // Check free margin in the specific token
+        uint256 freeInToken = getFreeMarginByToken(accountId, token);
+        if (amount > freeInToken) {
+            revert InsufficientFreeMargin(accountId, amount, freeInToken);
         }
 
+        // Update total locked IM and token-specific locked IM
         account.lockedIM += amount;
+        lockedIMByToken[accountId][token] += amount;
+
         emit InitialMarginLocked(accountId, amount);
     }
 
-    /// @notice Release locked initial margin (e.g., on position compression or maturity).
-    /// @param accountId The  account identifier.
+    /// @notice Release locked initial margin with specific token (e.g., on position compression or maturity).
+    /// @param accountId The account identifier.
+    /// @param token The collateral token to release.
     /// @param amount The amount to release.
     function releaseInitialMargin(
         bytes32 accountId,
+        address token,
         uint256 amount
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         if (amount == 0) revert ZeroAmount();
+        if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
         MarginAccount storage account = marginAccounts[accountId];
         if (!account.exists) revert AccountNotInitialized(accountId);
+        
         if (account.lockedIM < amount) {
             revert InsufficientLockedMargin(accountId, amount, account.lockedIM);
         }
+        if (lockedIMByToken[accountId][token] < amount) {
+            revert InsufficientLockedMargin(accountId, amount, lockedIMByToken[accountId][token]);
+        }
 
         account.lockedIM -= amount;
+        lockedIMByToken[accountId][token] -= amount;
+
         emit InitialMarginReleased(accountId, amount);
     }
 
-    /// @notice Settle variation margin for an account.
+    /// @notice Settle variation margin for an account with a specific token.
     /// @dev Positive amount = credit (account gains), negative = debit (account loses).
-    /// @param accountId The  account identifier.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token for VM settlement.
     /// @param amount Signed variation margin amount.
     function settleVariationMargin(
         bytes32 accountId,
+        address token,
         int256 amount
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
+        if (!acceptedTokens[token]) revert TokenNotAccepted(token);
+
         MarginAccount storage account = marginAccounts[accountId];
         if (!account.exists) revert AccountNotInitialized(accountId);
 
-        vmBalanceSigned[accountId] += amount;
+        // Update token-specific VM balance
+        vmBalanceSigned[accountId][token] += amount;
 
         // Update totalCollateral based on net VM
         if (amount > 0) {
             account.totalCollateral += uint256(amount);
+            tokenCollateral[accountId][token] += uint256(amount);
         } else if (amount < 0) {
             uint256 debit = uint256(-amount);
             // Allow totalCollateral to go below lockedIM (triggers liquidation check)
@@ -221,6 +246,12 @@ contract MarginVault is AccessControl, ReentrancyGuard {
                 account.totalCollateral -= debit;
             } else {
                 account.totalCollateral = 0;
+            }
+            // Also reduce token-specific collateral
+            if (tokenCollateral[accountId][token] >= debit) {
+                tokenCollateral[accountId][token] -= debit;
+            } else {
+                tokenCollateral[accountId][token] = 0;
             }
         }
 
@@ -250,6 +281,21 @@ contract MarginVault is AccessControl, ReentrancyGuard {
             free = account.totalCollateral - account.lockedIM;
         } else {
             // If totalCollateral < lockedIM (e.g., after large VM debit), free is 0
+            free = 0;
+        }
+    }
+
+    /// @notice Get the free (withdrawable) margin for an account in a specific token.
+    /// @dev Free margin in token = tokenCollateral - lockedIM in that token.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token.
+    /// @return free The amount of free margin available in the specific token.
+    function getFreeMarginByToken(bytes32 accountId, address token) public view returns (uint256 free) {
+        uint256 collateral = tokenCollateral[accountId][token];
+        uint256 locked = lockedIMByToken[accountId][token];
+        if (collateral >= locked) {
+            free = collateral - locked;
+        } else {
             free = 0;
         }
     }

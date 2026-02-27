@@ -48,7 +48,7 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "pdate `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json` and `store-logs-workflow/config.staging.json` with new addresses"
+	@echo "Update 'contracts/.env', 'create-trade-workflow/config.staging.json', 'settle-vm-workflow/config.staging.json' and 'store-logs-workflow/config.staging.json' with new addresses"
 
 
 # ============================================

@@ -25,7 +25,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
     /// @dev EIP-712 typehash for MatchedTrade struct.
     bytes32 public constant MATCHED_TRADE_TYPEHASH = keccak256(
-        "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline)"
+        "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline,address collateralToken)"
     );
 
     // ─── Struct Aliases ─────────────────────────────────────────────────
@@ -175,7 +175,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         // Release IM proportionally
         uint256 tenor = posA.maturityDate - posA.startDate;
         uint256 imRelease = riskEngine.calculateIM(compressionAmount, tenor);
-        marginVault.releaseInitialMargin(commonAccount, imRelease);
+        marginVault.releaseInitialMargin(commonAccount, posA.collateralToken, imRelease);
         
         // Update Maintenance Margin after position compression
         _updateAccountMaintenanceMargin(commonAccount);
@@ -227,8 +227,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         uint256 tenor = pos.maturityDate - pos.startDate;
         uint256 imRelease = riskEngine.calculateIM(pos.notional, tenor);
 
-        marginVault.releaseInitialMargin(pos.partyA, imRelease);
-        marginVault.releaseInitialMargin(pos.partyB, imRelease);
+        marginVault.releaseInitialMargin(pos.partyA, pos.collateralToken, imRelease);
+        marginVault.releaseInitialMargin(pos.partyB, pos.collateralToken, imRelease);
 
         // Update Maintenance Margin after position settlement
         _updateAccountMaintenanceMargin(pos.partyA);
@@ -411,9 +411,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         pos.lastNpv += npvChange;
 
         // Party A is the fixed payer: positive npvChange benefits A, debits B
+        // Settle VM in the position's collateral token
         if (npvChange != 0) {
-            marginVault.settleVariationMargin(pos.partyA, npvChange);
-            marginVault.settleVariationMargin(pos.partyB, -npvChange);
+            marginVault.settleVariationMargin(pos.partyA, pos.collateralToken, npvChange);
+            marginVault.settleVariationMargin(pos.partyB, pos.collateralToken, -npvChange);
         }
 
         emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
@@ -440,6 +441,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         if (trade.fixedRateBps == 0) revert InvalidTradeTerms();
         if (trade.paymentInterval == 0) revert InvalidTradeTerms();
         if (trade.partyA == trade.partyB) revert InvalidTradeTerms();
+        if (trade.collateralToken == address(0)) revert InvalidCollateralToken(trade.collateralToken);
 
         // Nonce checks
         if (usedNonces[trade.partyA][trade.nonce]) {
@@ -478,7 +480,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
                 trade.dayCountConvention,
                 trade.floatingRateIndex,
                 trade.nonce,
-                trade.deadline
+                trade.deadline,
+                trade.collateralToken
             )
         );
     }
@@ -520,9 +523,9 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         });
         uint256 tokenIdB = instrument.mintPosition(ownerB, termsB);
 
-        // Lock Initial Margin for both parties
-        marginVault.lockInitialMargin(trade.partyA, imRequired);
-        marginVault.lockInitialMargin(trade.partyB, imRequired);
+        // Lock Initial Margin for both parties (in the specified collateral token)
+        marginVault.lockInitialMargin(trade.partyA, trade.collateralToken, imRequired);
+        marginVault.lockInitialMargin(trade.partyB, trade.collateralToken, imRequired);
 
         // Update Maintenance Margin for both parties
         _updateAccountMaintenanceMargin(trade.partyA);
@@ -541,7 +544,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
             startDate: trade.startDate,
             maturityDate: trade.maturityDate,
             active: true,
-            lastNpv: 0
+            lastNpv: 0,
+            collateralToken: trade.collateralToken
         });
 
         // Track positions per account
@@ -550,7 +554,21 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         ++activePositionCount;
 
-        emit TradeNovated(trade.tradeId, tokenIdA, tokenIdB);
+        emit TradeNovated(
+            trade.tradeId,
+            tokenIdA,
+            tokenIdB,
+            trade.partyA,
+            trade.partyB,
+            trade.notional,
+            trade.fixedRateBps,
+            trade.startDate,
+            trade.maturityDate,
+            trade.paymentInterval,
+            trade.dayCountConvention,
+            trade.floatingRateIndex,
+            trade.collateralToken
+        );
     }
 
     /// @dev Calculate aggregate initial margin for all active positions of an account.

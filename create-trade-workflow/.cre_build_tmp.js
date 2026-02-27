@@ -15865,7 +15865,8 @@ var tradePayloadSchema = exports_external.object({
     dayCountConvention: exports_external.number(),
     floatingRateIndex: exports_external.string(),
     nonce: exports_external.number(),
-    deadline: exports_external.number()
+    deadline: exports_external.number(),
+    collateralToken: exports_external.string()
   }),
   sigA: exports_external.string(),
   sigB: exports_external.string(),
@@ -15905,6 +15906,7 @@ var submitTradeToClearingHouse = (runtime2, evmClient, payload) => {
   runtime2.log(`  Floating Rate Index: ${trade.floatingRateIndex}`);
   runtime2.log(`  Nonce: ${trade.nonce}`);
   runtime2.log(`  Deadline: ${new Date(trade.deadline * 1000).toISOString()}`);
+  runtime2.log(`  Collateral Token: ${trade.collateralToken}`);
   const tradeData = {
     tradeId: toBytes32(trade.tradeId),
     partyA: toBytes32(trade.partyA),
@@ -15917,7 +15919,8 @@ var submitTradeToClearingHouse = (runtime2, evmClient, payload) => {
     dayCountConvention: trade.dayCountConvention,
     floatingRateIndex: toBytes32(trade.floatingRateIndex),
     nonce: BigInt(trade.nonce),
-    deadline: BigInt(trade.deadline)
+    deadline: BigInt(trade.deadline),
+    collateralToken: trade.collateralToken
   };
   const tradeDataArray = [
     tradeData.tradeId,
@@ -15931,9 +15934,10 @@ var submitTradeToClearingHouse = (runtime2, evmClient, payload) => {
     BigInt(tradeData.dayCountConvention),
     tradeData.floatingRateIndex,
     tradeData.nonce,
-    tradeData.deadline
+    tradeData.deadline,
+    tradeData.collateralToken
   ];
-  const fullAbiParams = parseAbiParameters("uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256),bytes,bytes");
+  const fullAbiParams = parseAbiParameters("uint8,(bytes32,bytes32,bytes32,uint256,uint256,uint256,uint256,uint256,uint8,bytes32,uint256,uint256,address),bytes,bytes");
   const callData = encodeAbiParameters(fullAbiParams, [
     BigInt(0),
     tradeDataArray,
