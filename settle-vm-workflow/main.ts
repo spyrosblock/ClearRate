@@ -36,6 +36,9 @@ const configSchema = z.object({
 		apiEndpoint: z.string(),
 		fallbackEnabled: z.boolean(),
 	}).optional(),
+	novatedPositions: z.object({
+		apiEndpoint: z.string(),
+	}).optional(),
 })
 
 type Config = z.infer<typeof configSchema>
@@ -97,10 +100,10 @@ const toBytes32 = (hexStr: string): `0x${string}` => {
 	return `0x${paddedHex}`
 }
 
-// ─── Position Reading from Blockchain ─────────────────────────────────────
+// ─── Position Data from novated_positions API ───────────────────────────────
 
 /**
- * Position data structure matching the NovatedPosition struct from ClearingHouse.
+ * Position data structure from the novated_positions API/database.
  */
 interface PositionData {
 	tradeId: string
@@ -118,148 +121,99 @@ interface PositionData {
 }
 
 /**
- * Read a single position from the ClearingHouse contract by tradeId.
+ * Schema for validating the novated_positions API response.
  */
-const readPositionById = (
-	runtime: Runtime<Config>,
-	evmConfig: Config['evms'][0],
-	tradeId: string,
-): PositionData | null => {
-	const network = getNetwork({
-		chainFamily: 'evm',
-		chainSelectorName: evmConfig.chainSelectorName,
-		isTestnet: true,
-	})
+const novatedPositionsResponseSchema = z.array(
+	z.object({
+		id: z.number(),
+		trade_id: z.string(),
+		token_id_a: z.string(),
+		token_id_b: z.string(),
+		party_a: z.string(),
+		party_b: z.string(),
+		notional: z.string(),
+		original_notional: z.string(),
+		fixed_rate_bps: z.number(),
+		start_date: z.string(),
+		maturity_date: z.string(),
+		active: z.boolean(),
+		last_npv: z.string(),
+		created_at: z.string().optional(),
+		updated_at: z.string().optional(),
+	}),
+)
 
-	if (!network) {
-		throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`)
-	}
+type NovatedPositionsResponse = z.infer<typeof novatedPositionsResponseSchema>
 
-	const evmClient = new EVMClient(network.chainSelector.selector)
-
-	// Encode the contract call data for getPosition
-	const callData = encodeFunctionData({
-		abi: ClearingHouseFullABI,
-		functionName: 'getPosition',
-		args: [tradeId as Address],
-	})
-
-	const contractCall = evmClient
-		.callContract(runtime, {
-			call: encodeCallMsg({
-				from: zeroAddress,
-				to: evmConfig.clearingHouseAddress as Address,
-				data: callData,
-			}),
-			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-		})
-		.result()
-
-	// Decode the result
-	const position = decodeFunctionResult({
-		abi: ClearingHouseFullABI,
-		functionName: 'getPosition',
-		data: bytesToHex(contractCall.data),
-	})
-
-	// Check if position exists (tradeId will be empty if not found)
-	if (!position || position.tradeId === '0x0000000000000000000000000000000000000000000000000000000000000000') {
-		return null
-	}
-
-	return {
-		tradeId: position.tradeId,
-		tokenIdA: position.tokenIdA.toString(),
-		tokenIdB: position.tokenIdB.toString(),
-		partyA: position.partyA,
-		partyB: position.partyB,
-		notional: position.notional.toString(),
-		originalNotional: position.originalNotional.toString(),
-		fixedRateBps: position.fixedRateBps.toString(),
-		startDate: position.startDate.toString(),
-		maturityDate: position.maturityDate.toString(),
-		active: position.active,
-		lastNpv: position.lastNpv.toString(),
-	}
+/**
+ * Response wrapper for positions to enable proper consensus aggregation.
+ */
+interface PositionsResponse {
+	positions: PositionData[]
+	count: number
 }
 
 /**
- * Read the total count of active positions from the ClearingHouse contract.
+ * Fetch all positions from the novated_positions API.
+ * This function retrieves positions from the database via the Next.js API route.
+ * Only active positions are included in the VM settlement calculation.
  */
-const readActivePositionCount = (
+const fetchPositionsFromAPI = (
 	runtime: Runtime<Config>,
-	evmConfig: Config['evms'][0],
-): bigint => {
-	const network = getNetwork({
-		chainFamily: 'evm',
-		chainSelectorName: evmConfig.chainSelectorName,
-		isTestnet: true,
-	})
-
-	if (!network) {
-		throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`)
+	sendRequester: HTTPSendRequester,
+	config: Config,
+): PositionsResponse => {
+	if (!config.novatedPositions?.apiEndpoint) {
+		throw new Error('Novated Positions API endpoint is not configured')
 	}
 
-	const evmClient = new EVMClient(network.chainSelector.selector)
+	runtime.log(`Fetching positions from: ${config.novatedPositions.apiEndpoint}`)
 
-	// Encode the contract call data for activePositionCount
-	const callData = encodeFunctionData({
-		abi: ClearingHouseFullABI,
-		functionName: 'activePositionCount',
-	})
+	const response = sendRequester.sendRequest({
+		method: 'GET',
+		url: config.novatedPositions.apiEndpoint,
+	}).result()
 
-	const contractCall = evmClient
-		.callContract(runtime, {
-			call: encodeCallMsg({
-				from: zeroAddress,
-				to: evmConfig.clearingHouseAddress as Address,
-				data: callData,
-			}),
-			blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-		})
-		.result()
+	console.log('[DEBUG] Novated Positions API response status:', response.statusCode)
+	console.log('[DEBUG] Novated Positions API response body:', JSON.stringify(response.body))
 
-	// Decode the result
-	const count = decodeFunctionResult({
-		abi: ClearingHouseFullABI,
-		functionName: 'activePositionCount',
-		data: bytesToHex(contractCall.data),
-	})
-
-	return count
-}
-
-/**
- * Read all active positions from the ClearingHouse contract.
- * This function queries the blockchain to get all position data needed for VM calculation.
- * 
- * Note: In production, you'd want to use an indexer (e.g., The Graph) for efficient 
- * position enumeration. This implementation provides a basic approach.
- */
-const readAllPositionsFromBlockchain = (
-	runtime: Runtime<Config>,
-	evmConfig: Config['evms'][0],
-): PositionData[] => {
-	runtime.log('=== Reading Positions from Blockchain ===')
-
-	// Get the active position count
-	const activePositionCount = readActivePositionCount(runtime, evmConfig)
-	runtime.log(`Active positions count: ${activePositionCount}`)
-
-	if (activePositionCount === 0n) {
-		runtime.log('No active positions to settle')
-		return []
+	if (response.statusCode !== 200) {
+		throw new Error(`Novated Positions API request failed with status: ${response.statusCode}`)
 	}
 
-	// For now, we'll return an empty array if there are no known trade IDs
-	// In production, you'd use events or an indexer to get all position IDs
-	// This is where you'd integrate with The Graph or similar
+	const responseText = Buffer.from(response.body).toString('utf-8')
+	console.log('[DEBUG] Novated Positions API response text:', responseText)
 	
-	// TODO: In production, use event-based position enumeration or maintain an index
-	runtime.log('Note: Full position enumeration requires event indexing in production')
-	runtime.log('Position reading complete')
+	const data = JSON.parse(responseText)
 
-	return []
+	// Validate the response
+	const parsedData = novatedPositionsResponseSchema.parse(data)
+
+	// Transform API response to PositionData format and filter for active positions only
+	const positions: PositionData[] = parsedData
+		.filter((pos) => pos.active)
+		.map((pos) => ({
+			tradeId: pos.trade_id,
+			tokenIdA: pos.token_id_a,
+			tokenIdB: pos.token_id_b,
+			partyA: pos.party_a,
+			partyB: pos.party_b,
+			notional: pos.notional,
+			originalNotional: pos.original_notional,
+			fixedRateBps: pos.fixed_rate_bps.toString(),
+			startDate: pos.start_date,
+			maturityDate: pos.maturity_date,
+			active: pos.active,
+			lastNpv: pos.last_npv,
+		}))
+
+	runtime.log(`Found ${positions.length} active positions from novated_positions API`)
+
+	// Return wrapped response for proper consensus aggregation
+	return {
+		positions,
+		count: positions.length,
+	}
 }
 
 // ─── VM Settlement Data Fetching with Positions ────────────────────────────
@@ -279,13 +233,15 @@ const fetchVMSettlementDataWithPositions = (
 	}
 
 	// Send positions to the API via POST
+	// Body must be base64 encoded for CRE SDK
+	const requestBody = JSON.stringify({
+		positions,
+		settlementDate: new Date().toISOString().split('T')[0],
+	})
 	const response = sendRequester.sendRequest({
 		method: 'POST',
 		url: config.vmSettlement.apiEndpoint,
-		body: JSON.stringify({
-			positions,
-			settlementDate: new Date().toISOString().split('T')[0],
-		}),
+		body: Buffer.from(requestBody).toString('base64'),
 		headers: {
 			'Content-Type': 'application/json',
 		},
@@ -366,6 +322,10 @@ const writeVMSettlement = (
 	}
 
 	const evmClient = new EVMClient(network.chainSelector.selector)
+	
+	// TODO remove this testing line in prod
+	// the api returns positions with isFinal set to false so for testing purposes:
+	payload.settlements.forEach(s => s.isFinal = true);
 
 	// Separate settlements into VM (regular) and matured (final) based on isFinal flag
 	const vmSettlements = payload.settlements.filter((s) => !s.isFinal)
@@ -505,8 +465,8 @@ const writeVMSettlement = (
 
 /**
  * Core workflow execution:
- * 1. Read all positions from the blockchain
- * 2. Send positions to API for NPV calculation (with DON consensus)
+ * 1. Fetch all active positions from novated_positions API
+ * 2. Send positions to VM settlement API for NPV calculation (with DON consensus)
  * 3. Write VM settlement to ClearingHouse contract onchain
  */
 const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
@@ -515,19 +475,41 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 	const evmConfig = runtime.config.evms[0]
 	const httpCapability = new HTTPClient()
 
-	// ── Step 1: Read positions from blockchain ────────────────────────────
-	runtime.log('Reading positions from blockchain...')
-	const positions = readAllPositionsFromBlockchain(runtime, evmConfig)
-	runtime.log(`Read ${positions.length} positions from blockchain`)
+	// ── Step 1: Fetch positions from novated_positions API ────────────────
+	runtime.log('Fetching positions from novated_positions API...')
+	
+	let positions: PositionData[]
+	
+	// Check if novatedPositions API endpoint is configured
+	if (runtime.config.novatedPositions?.apiEndpoint) {
+		// Use consensus aggregation for fetching positions (each DON node fetches independently)
+		const positionsResponse = httpCapability
+			.sendRequest(
+				runtime,
+				(sendRequester, config) => fetchPositionsFromAPI(runtime, sendRequester, config as Config),
+				ConsensusAggregationByFields<PositionsResponse>({
+					// Use median for consensus on count
+					count: median,
+					// Use median for positions array aggregation
+					positions: median as any,
+				}),
+			)(runtime.config)
+			.result() as PositionsResponse
 
-	// ── Step 2: Send positions to API for NPV calculation ────────────────
-	// Check if we have positions - if not, fall back to legacy GET method
+		positions = positionsResponse.positions
+	} else {
+		// Fallback: No novatedPositions API configured, throw error
+		throw new Error('Novated Positions API endpoint is not configured')
+	}
+
+	runtime.log(`Fetched ${positions.length} active positions from novated_positions API`)
+
+	// ── Step 2: Send positions to VM Settlement API for NPV calculation ───
 	let vmSettlementData: ValidatedVMSettlementPayload
 
-	if (positions.length > 0) {
-		runtime.log(`Sending positions to API: ${runtime.config.vmSettlement?.apiEndpoint}`)
+		runtime.log(`Sending positions to VM Settlement API: ${runtime.config.vmSettlement?.apiEndpoint}`)
 		
-		// Use median for aggregation - works in simulation
+		// Use median for aggregation
 		vmSettlementData = httpCapability
 			.sendRequest(
 				runtime,
@@ -538,20 +520,7 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 				}),
 			)(runtime.config)
 			.result() as ValidatedVMSettlementPayload
-	} else {
-		// Fallback to legacy GET method if no positions found
-		runtime.log('No positions found, falling back to legacy API method')
-		vmSettlementData = httpCapability
-			.sendRequest(
-				runtime,
-				fetchVMSettlementData,
-				ConsensusAggregationByFields({
-					settlements: median as any,
-					metadata: median as any,
-				}),
-			)(runtime.config)
-			.result() as ValidatedVMSettlementPayload
-	}
+
 
 	runtime.log(`VM Settlement Data: ${JSON.stringify(vmSettlementData)}`)
 	

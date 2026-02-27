@@ -105,7 +105,7 @@ Example for how it's supposed to work
 cd contracts && make deploy-contracts-sepolia && cd ..
 ```
 
-2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json` and `settle-vm-workflow/config.staging.json` with new addresses)
+2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json` and `store-logs-workflow/config.staging.json` with new addresses)
 
 3. Deployer whitelists the user addresses
 ```
@@ -127,7 +127,7 @@ cd contracts && make create-trade-sepolia && cd ..
 cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/trade.json)" --non-interactive --trigger-index 0
 ```
 
-7. The event log triggers the store-logs-workflow
+7. The event log triggers the store-logs-workflow (event number 9 - 0-based)
 ```
 cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
 ```
@@ -137,7 +137,12 @@ cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-lo
 cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm-workflow --target staging-settings --broadcast
 ```
 
-9.  The user can withdraw their collateral after the trade is settled
+9. When the trade is matured, the event triggers the store-logs-workflow (event numbers 11 and 23 - 0-based)
+```
+cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
+```
+
+10.  The user can withdraw their collateral after the trade is settled
 ```
 cd contracts && make withdraw-margin-sepolia && cd ..
 ```

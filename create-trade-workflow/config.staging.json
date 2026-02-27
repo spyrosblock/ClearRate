@@ -1,7 +1,7 @@
 {
   "evms": [
     {
-      "clearingHouseAddress": "0xbA4f1825CA34AE68035Fbb615273e6406e7F3271",
+      "clearingHouseAddress": "0x174F9531CA4854A01f4aDc6e3ED4dC5d9c5aD69B",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "2000000"
     }

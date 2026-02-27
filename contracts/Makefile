@@ -48,7 +48,7 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "Update contracts/.env, create-trade-workflow/config.staging.json and settle-vm-workflow/config.staging.json with new addresses"
+	@echo "pdate `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json` and `store-logs-workflow/config.staging.json` with new addresses"
 
 
 # ============================================
@@ -65,7 +65,7 @@ whitelist-users-sepolia:
 		-vv
 
 # ============================================
-# MARGIN DEPOSITS
+# MARGIN DEPOSITS & WITHDRAWALS
 # ============================================
 
 # Deposit margin for 2 users on Sepolia
@@ -76,6 +76,15 @@ deposit-margin-sepolia:
 		--broadcast \
 		-vv
 	@echo "Margin deposit complete!"
+
+# Withdraw margin for 2 users on Sepolia (default: full free margin balance, or set WITHDRAW_AMOUNT)
+withdraw-margin-sepolia:
+	@echo "Withdrawing margin for 2 users on Ethereum Sepolia..."
+	@forge script script/WithdrawMargin.s.sol:WithdrawMargin \
+		--rpc-url sepolia \
+		--broadcast \
+		-vv
+	@echo "Margin withdrawal complete!"
 
 # ============================================
 # READ MARGIN DATA
@@ -139,7 +148,8 @@ help:
 	@echo "  make whitelist-users-sepolia - Whitelist 2 users on Ethereum Sepolia"
 	@echo ""
 	@echo "Margin:"
-	@echo "  make deposit-margin-sepolia   - Deposit margin for 2 users on Ethereum Sepolia"
+	@echo "  make deposit-margin-sepolia    - Deposit margin for 2 users on Ethereum Sepolia"
+	@echo "  make withdraw-margin-sepolia  - Withdraw margin for 2 users on Ethereum Sepolia"
 	@echo "  make get-margin-data-sepolia   - Read all margin data for all accounts on Ethereum Sepolia"
 	@echo ""
 	@echo "Utilities:"

@@ -2,13 +2,16 @@
   "schedule": "0 0 * * *",
   "evms": [
     {
-      "clearingHouseAddress": "0x0000000000000000000000000000000000000000",
+      "clearingHouseAddress": "0xf55D4684736dB020d8647B61737D726A5d3c5E66",
       "chainSelectorName": "ethereum-mainnet",
       "gasLimit": "500000"
     }
   ],
   "vmSettlement": {
-    "apiEndpoint": "https://clear-rate.vercel.app/api/margin/variation-margin",
+    "apiEndpoint": "https://clear-rate.vercel.app/api/variation-margin",
     "fallbackEnabled": false
+  },
+  "novatedPositions": {
+    "apiEndpoint": "https://clear-rate.vercel.app/api/novated-positions"
   }
 }
