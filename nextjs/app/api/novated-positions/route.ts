@@ -20,6 +20,7 @@ interface NovatedPositionPayload {
 	maturityDate: string
 	active: boolean
 	lastNpv: string
+	collateralToken: string
 }
 
 /**
@@ -72,7 +73,8 @@ export async function POST(request: Request) {
 					start_date,
 					maturity_date,
 					active,
-					last_npv
+					last_npv,
+					collateral_token
 				) VALUES (
 					${payload.tradeId},
 					${payload.tokenIdA},
@@ -85,7 +87,8 @@ export async function POST(request: Request) {
 					${startDate},
 					${maturityDate},
 					${payload.active},
-					${payload.lastNpv}
+					${payload.lastNpv},
+					${payload.collateralToken}
 				)
 				ON CONFLICT (trade_id) DO UPDATE SET
 					token_id_a = EXCLUDED.token_id_a,
@@ -99,6 +102,7 @@ export async function POST(request: Request) {
 					maturity_date = EXCLUDED.maturity_date,
 					active = EXCLUDED.active,
 					last_npv = EXCLUDED.last_npv,
+					collateral_token = EXCLUDED.collateral_token,
 					updated_at = NOW()
 			`
 
@@ -156,6 +160,7 @@ export async function GET() {
 				maturity_date,
 				active,
 				last_npv,
+				collateral_token,
 				created_at,
 				updated_at
 			FROM novated_positions
