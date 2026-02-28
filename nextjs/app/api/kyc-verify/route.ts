@@ -4,20 +4,13 @@ import { NextRequest, NextResponse } from 'next/server';
  * Mock KYC Verification API
  * 
  * This endpoint approves every user with tier 3 (Institutional)
- * It accepts user data and returns whitelist parameters.
+ * It accepts company data and returns whitelist parameters.
  * 
  * Request body:
  * {
  *   address: string,        // Ethereum address
  *   accountId: string,      // Account ID
- *   personal?: {            // Optional personal data
- *     firstName: string,
- *     lastName: string,
- *     email: string,
- *     dateOfBirth: string,
- *     country: string
- *   },
- *   company?: {             // Optional company data
+ *   company: {              // Required company data
  *     companyName: string,
  *     registrationNumber: string,
  *     registeredCountry: string,
@@ -38,7 +31,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const { address, accountId, personal, company } = body;
+    const { address, accountId, company } = body;
     
     // Validate required fields
     if (!address || !accountId) {
@@ -64,22 +57,31 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Validate company data
+    if (!company) {
+      return NextResponse.json(
+        { approved: false, reason: 'Company data is required' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate company fields
+    if (!company.companyName || !company.registrationNumber || !company.registeredCountry || !company.contactEmail) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required company fields: companyName, registrationNumber, registeredCountry, contactEmail' },
+        { status: 400 }
+      );
+    }
+    
     // Log the verification request
     console.log('[KYC Mock] Verification request received:');
     console.log('  Address:', address);
     console.log('  Account ID:', accountId);
-    
-    if (personal) {
-      console.log('  Type: Personal');
-      console.log('  Name:', personal.firstName, personal.lastName);
-      console.log('  Email:', personal.email);
-      console.log('  Country:', personal.country);
-    } else if (company) {
-      console.log('  Type: Company');
-      console.log('  Company:', company.companyName);
-      console.log('  Registration:', company.registrationNumber);
-      console.log('  Country:', company.registeredCountry);
-    }
+    console.log('  Type: Company');
+    console.log('  Company:', company.companyName);
+    console.log('  Registration:', company.registrationNumber);
+    console.log('  Country:', company.registeredCountry);
+    console.log('  Contact Email:', company.contactEmail);
     
     // Mock KYC verification - always approve with tier 3
     // Tier 3 = Institutional - $10M max notional
