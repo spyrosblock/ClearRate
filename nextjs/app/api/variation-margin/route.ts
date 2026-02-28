@@ -11,7 +11,6 @@ interface PositionData {
   partyA: string;
   partyB: string;
   notional: string;
-  originalNotional: string;
   fixedRateBps: string;
   startDate: string;
   maturityDate: string;

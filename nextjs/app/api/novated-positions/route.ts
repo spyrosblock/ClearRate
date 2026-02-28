@@ -14,7 +14,6 @@ interface NovatedPositionPayload {
 	partyA: string
 	partyB: string
 	notional: string
-	originalNotional: string
 	fixedRateBps: string
 	startDate: string
 	maturityDate: string
@@ -82,7 +81,6 @@ export async function POST(request: Request) {
 					${payload.partyA},
 					${payload.partyB},
 					${payload.notional},
-					${payload.originalNotional},
 					${parseInt(payload.fixedRateBps)},
 					${startDate},
 					${maturityDate},
