@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     
     // Return the risk assessment
     const response = {
-      maxNotional: '10000000000000_000000000000000000'
+      maxNotional: '100_000_000_000000000000000000' // 10M USD in wei
     };
     
     console.log('[Risk Management] Assessment result:', response);
