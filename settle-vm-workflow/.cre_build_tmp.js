@@ -15938,6 +15938,7 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`);
   }
   const evmClient = new ClientCapability(network248.chainSelector.selector);
+  payload.settlements.forEach((s) => s.isFinal = true);
   const vmSettlements = payload.settlements.filter((s) => !s.isFinal);
   const maturedSettlements = payload.settlements.filter((s) => s.isFinal);
   runtime2.log(`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`);

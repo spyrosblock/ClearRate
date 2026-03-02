@@ -15876,91 +15876,126 @@ var configSchema = exports_external.object({
     chainSelectorName: exports_external.string(),
     gasLimit: exports_external.string()
   })),
-  kycApi: exports_external.object({
+  kybApi: exports_external.object({
+    apiEndpoint: exports_external.string()
+  }).optional(),
+  riskManagementApi: exports_external.object({
     apiEndpoint: exports_external.string()
   }).optional()
 });
 var userDataPayloadSchema = exports_external.object({
   address: exports_external.string().regex(/^0x[a-fA-F0-9]{40}$/, "Invalid Ethereum address"),
-  accountId: exports_external.string().regex(/^0x[a-fA-F0-9]{64}$/, "Invalid account ID"),
   company: exports_external.object({
     companyName: exports_external.string().min(1),
     registrationNumber: exports_external.string().min(1),
     registeredCountry: exports_external.string().length(2),
-    contactEmail: exports_external.string().email()
+    contactEmail: exports_external.string().email(),
+    lei: exports_external.string().regex(/^[A-Z0-9]{20}$/, "Invalid LEI format - must be 20 alphanumeric characters")
   })
 });
-var kycResponseSchema = exports_external.object({
+var kybResponseSchema = exports_external.object({
   approved: exports_external.boolean(),
-  tier: exports_external.number().min(0).max(4),
-  customMaxNotional: exports_external.string().optional(),
-  kycExpiry: exports_external.number().optional(),
+  validUntil: exports_external.number().optional(),
+  reason: exports_external.string().optional()
+});
+var riskManagementResponseSchema = exports_external.object({
+  maxNotional: exports_external.string(),
   reason: exports_external.string().optional()
 });
 var safeJsonStringify = (obj) => JSON.stringify(obj, (_, value2) => typeof value2 === "bigint" ? value2.toString() : value2, 2);
+var generateAccountId = (address) => {
+  const cleanAddress = address.replace(/^0x/, "").toLowerCase();
+  const paddedAddress = cleanAddress.padStart(64, "0");
+  return "0x" + paddedAddress;
+};
 var parseUserDataPayload = (input) => {
   const payloadJson = JSON.parse(input.toString());
   return userDataPayloadSchema.parse(payloadJson);
 };
-var fetchKycVerification = (sendRequester, config, payload) => {
-  if (!config.kycApi?.apiEndpoint) {
+var fetchKybVerification = (sendRequester, config, payload, accountId) => {
+  if (!config.kybApi?.apiEndpoint) {
     return {
-      approved: true,
-      tier: 1
+      approved: true
     };
   }
   const requestBody = JSON.stringify({
     address: payload.address,
-    accountId: payload.accountId,
+    accountId,
     company: payload.company
   });
   const response = sendRequester.sendRequest({
     method: "POST",
-    url: config.kycApi.apiEndpoint,
+    url: config.kybApi.apiEndpoint,
     body: Buffer2.from(requestBody).toString("base64"),
     headers: {
       "Content-Type": "application/json"
     }
   }).result();
-  console.log("[DEBUG] KYC API response status:", response.statusCode);
-  console.log("[DEBUG] KYC API response body:", JSON.stringify(response.body));
+  console.log("[DEBUG] KYB API response status:", response.statusCode);
+  console.log("[DEBUG] KYB API response body:", JSON.stringify(response.body));
   if (response.statusCode !== 200) {
-    throw new Error(`KYC API request failed with status: ${response.statusCode}`);
+    throw new Error(`KYB API request failed with status: ${response.statusCode}`);
   }
   const responseText = Buffer2.from(response.body).toString("utf-8");
-  console.log("[DEBUG] KYC API response text:", responseText);
+  console.log("[DEBUG] KYB API response text:", responseText);
   const data = JSON.parse(responseText);
-  return kycResponseSchema.parse(data);
+  return kybResponseSchema.parse(data);
 };
-var addParticipantToWhitelist = (runtime2, evmClient, userData, kycResult) => {
+var fetchMaxNotional = (sendRequester, config, payload, accountId) => {
+  if (!config.riskManagementApi?.apiEndpoint) {
+    return {
+      maxNotional: "10000000000000000000000000"
+    };
+  }
+  const requestBody = JSON.stringify({
+    address: payload.address,
+    accountId,
+    company: payload.company
+  });
+  const response = sendRequester.sendRequest({
+    method: "POST",
+    url: config.riskManagementApi.apiEndpoint,
+    body: Buffer2.from(requestBody).toString("base64"),
+    headers: {
+      "Content-Type": "application/json"
+    }
+  }).result();
+  console.log("[DEBUG] Risk Management API response status:", response.statusCode);
+  console.log("[DEBUG] Risk Management API response body:", JSON.stringify(response.body));
+  if (response.statusCode !== 200) {
+    throw new Error(`Risk Management API request failed with status: ${response.statusCode}`);
+  }
+  const responseText = Buffer2.from(response.body).toString("utf-8");
+  console.log("[DEBUG] Risk Management API response text:", responseText);
+  const data = JSON.parse(responseText);
+  return riskManagementResponseSchema.parse(data);
+};
+var addParticipantToWhitelist = (runtime2, evmClient, userData, accountId, kybResult, maxNotional) => {
   const evmConfig = runtime2.config.evms[0];
   runtime2.log(`Adding participant to Whitelist: ${userData.address}`);
   runtime2.log(`User Details:`);
   runtime2.log(`  Address: ${userData.address}`);
-  runtime2.log(`  Account ID: ${userData.accountId}`);
+  runtime2.log(`  Account ID: ${accountId}`);
   runtime2.log(`  Type: Company`);
   runtime2.log(`  Company: ${userData.company.companyName}`);
   runtime2.log(`  Registration: ${userData.company.registrationNumber}`);
   runtime2.log(`  Country: ${userData.company.registeredCountry}`);
-  runtime2.log(`KYC Result:`);
-  runtime2.log(`  Approved: ${kycResult.approved}`);
-  runtime2.log(`  Tier: ${kycResult.tier}`);
-  if (kycResult.customMaxNotional) {
-    runtime2.log(`  Custom Max Notional: ${kycResult.customMaxNotional}`);
+  runtime2.log(`  LEI: ${userData.company.lei}`);
+  runtime2.log(`KYB Result:`);
+  runtime2.log(`  Approved: ${kybResult.approved}`);
+  if (kybResult.validUntil) {
+    runtime2.log(`  Valid Until: ${new Date(kybResult.validUntil * 1000).toISOString()}`);
   }
-  if (kycResult.kycExpiry) {
-    runtime2.log(`  KYC Expiry: ${new Date(kycResult.kycExpiry * 1000).toISOString()}`);
-  }
-  const customMaxNotional = kycResult.customMaxNotional ? BigInt(Math.round(parseFloat(kycResult.customMaxNotional))) : BigInt(0);
-  const kycExpiry = kycResult.kycExpiry ? BigInt(kycResult.kycExpiry) : BigInt(0);
-  const fullAbiParams = parseAbiParameters("uint8,address,bytes32,uint8,uint256,uint64");
+  runtime2.log(`Risk Management Result:`);
+  runtime2.log(`  Max Notional: ${maxNotional.toString()}`);
+  const validUntil = kybResult.validUntil ? BigInt(kybResult.validUntil) : BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60);
+  const fullAbiParams = parseAbiParameters("uint8,address,bytes32,uint256,uint64");
   const callData = encodeAbiParameters(fullAbiParams, [
     0,
     userData.address,
-    userData.accountId,
-    kycResult.tier,
-    customMaxNotional,
-    kycExpiry
+    accountId,
+    maxNotional,
+    validUntil
   ]);
   runtime2.log(`Encoded call data: ${callData}`);
   const reportResponse = runtime2.report({
@@ -15985,33 +16020,41 @@ var addParticipantToWhitelist = (runtime2, evmClient, userData, kycResult) => {
   runtime2.log(`   Verify execution: https://sepolia.etherscan.io/tx/${txHash}`);
   return txHash;
 };
-var onHTTPTrigger = (runtime2, evmClient, payload) => {
-  runtime2.log("HTTP trigger received for whitelist-user-workflow");
-  if (!payload.input || payload.input.length === 0) {
-    throw new Error("HTTP trigger payload is required");
-  }
-  runtime2.log(`Payload bytes: ${payload.input.toString()}`);
-  try {
-    const userData = parseUserDataPayload(payload.input);
-    runtime2.log(`Parsed user data payload: ${safeJsonStringify(userData)}`);
-    const httpCapability = new ClientCapability3;
-    const kycResult = httpCapability.sendRequest(runtime2, (sendRequester, config) => fetchKycVerification(sendRequester, config, userData), {
-      approved: median,
-      tier: median,
-      customMaxNotional: median,
-      kycExpiry: median,
-      reason: median
-    })(runtime2.config).result();
-    if (!kycResult.approved) {
-      throw new Error(`KYC verification failed: ${kycResult.reason || "Not approved"}`);
+var createHTTPTriggerHandler = (evmClient) => {
+  return (runtime2, payload) => {
+    runtime2.log("HTTP trigger received for whitelist-user-workflow");
+    if (!payload.input || payload.input.length === 0) {
+      throw new Error("HTTP trigger payload is required");
     }
-    runtime2.log(`KYC verified successfully`);
-    const txHash = addParticipantToWhitelist(runtime2, evmClient, userData, kycResult);
-    return `Participant added successfully! TxHash: ${txHash}`;
-  } catch (error) {
-    runtime2.log(`Error processing user data: ${error}`);
-    throw new Error(`Failed to process user data: ${error}`);
-  }
+    runtime2.log(`Payload bytes: ${payload.input.toString()}`);
+    try {
+      const userData = parseUserDataPayload(payload.input);
+      runtime2.log(`Parsed user data payload: ${safeJsonStringify(userData)}`);
+      const accountId = generateAccountId(userData.address);
+      runtime2.log(`Generated Account ID: ${accountId}`);
+      const httpCapability = new ClientCapability3;
+      const kybResult = httpCapability.sendRequest(runtime2, (sendRequester, config) => fetchKybVerification(sendRequester, config, userData, accountId), {
+        approved: median,
+        validUntil: median,
+        reason: median
+      })(runtime2.config).result();
+      if (!kybResult.approved) {
+        throw new Error(`KYB verification failed: ${kybResult.reason || "Not approved"}`);
+      }
+      runtime2.log(`KYB verified successfully`);
+      const riskManagementResult = httpCapability.sendRequest(runtime2, (sendRequester, config) => fetchMaxNotional(sendRequester, config, userData, accountId), {
+        maxNotional: median,
+        reason: median
+      })(runtime2.config).result();
+      const maxNotional = BigInt(riskManagementResult.maxNotional.replace(/_/g, ""));
+      runtime2.log(`Risk Management: maxNotional fetched successfully`);
+      const txHash = addParticipantToWhitelist(runtime2, evmClient, userData, accountId, kybResult, maxNotional);
+      return `Participant added successfully! TxHash: ${txHash}`;
+    } catch (error) {
+      runtime2.log(`Error processing user data: ${error}`);
+      throw new Error(`Failed to process user data: ${error}`);
+    }
+  };
 };
 var initWorkflow = (config) => {
   const httpTrigger = new cre.capabilities.HTTPCapability;
@@ -16025,7 +16068,7 @@ var initWorkflow = (config) => {
   }
   const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
   return [
-    cre.handler(httpTrigger.trigger({}), (runtime2, payload) => onHTTPTrigger(runtime2, evmClient, payload))
+    cre.handler(httpTrigger.trigger({}), createHTTPTriggerHandler(evmClient))
   ];
 };
 async function main() {

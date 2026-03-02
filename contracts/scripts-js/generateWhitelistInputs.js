@@ -42,14 +42,16 @@ function generateCompanyInfo(userNumber) {
       companyName: "TechCorp Solutions",
       registrationNumber: "TC123456789",
       registeredCountry: "DE",
-      contactEmail: "contact@techcorp.com"
+      contactEmail: "contact@techcorp.com",
+      lei: "549300KHAXQ1P3T4GJ31"
     };
   } else {
     return {
       companyName: "Jane Johnson",
       registrationNumber: "JJ123456789",
       registeredCountry: "CA",
-      contactEmail: "jane.johnson@example.com"
+      contactEmail: "jane.johnson@example.com",
+      lei: "549300123456789012"
     };
   }
 }
@@ -113,7 +115,6 @@ async function main() {
     
     const userData = {
       address: user.address,
-      accountId: accountId,
       company: companyInfo
     };
     

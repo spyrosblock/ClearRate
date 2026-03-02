@@ -1,10 +1,10 @@
 {
   "address": "0x474B4E7FD1A143eDea6b77aa845F429D443E6410",
-  "accountId": "0x0000000000000000000000000000000000000000000000000000000000000001",
   "company": {
     "companyName": "TechCorp Solutions",
     "registrationNumber": "TC123456789",
     "registeredCountry": "DE",
-    "contactEmail": "contact@techcorp.com"
+    "contactEmail": "contact@techcorp.com",
+    "lei": "549300KHAXQ1P3T4GJ31"
   }
 }

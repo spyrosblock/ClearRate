@@ -55,8 +55,8 @@ contract WithdrawMargin is Script {
         user2Address = _parseAddress(user2AddrStr);
 
         // Load account IDs
-        accountId1 = bytes32(vm.envUint("USER1_ACCOUNT_ID"));
-        accountId2 = bytes32(vm.envUint("USER2_ACCOUNT_ID"));
+        accountId1 = _addressToAccountId(user1Address);
+        accountId2 = _addressToAccountId(user2Address);
 
         // Load private keys
         string memory user1KeyStr = vm.envString("USER1_PRIVATE_KEY");
@@ -303,5 +303,10 @@ contract WithdrawMargin is Script {
             result = result * 16 + digit;
         }
         return result;
+    }
+
+    /// @dev Convert an address to a bytes32 account ID with left padding of 0s
+    function _addressToAccountId(address addr) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(addr)));
     }
 }

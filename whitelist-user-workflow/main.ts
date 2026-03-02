@@ -12,7 +12,7 @@ import {
 	TxStatus,
 } from '@chainlink/cre-sdk'
 import { Buffer } from 'buffer'
-import { encodeAbiParameters, parseAbiParameters } from 'viem'
+import { encodeAbiParameters, parseAbiParameters, keccak256, toBytes } from 'viem'
 import { z } from 'zod'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
@@ -44,7 +44,6 @@ type Config = z.infer<typeof configSchema>
 const userDataPayloadSchema = z.object({
 	// User identification
 	address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address'),
-	accountId: z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Invalid account ID'),
 
 	// Company data
 	company: z.object({
@@ -91,6 +90,21 @@ const safeJsonStringify = (obj: any): string =>
 	JSON.stringify(obj, (_, value) => (typeof value === 'bigint' ? value.toString() : value), 2)
 
 /**
+ * Generate an accountId (bytes32) from an address, padded with zeros on the left.
+ * Returns a string like "0x..." with 64 hex characters (32 bytes).
+ */
+const generateAccountId = (address: string): string => {
+	// Remove '0x' prefix if present and ensure lowercase
+	const cleanAddress = address.replace(/^0x/, '').toLowerCase()
+	
+	// Pad with zeros on the left to make it 64 characters (32 bytes)
+	const paddedAddress = cleanAddress.padStart(64, '0')
+	
+	// Return with '0x' prefix
+	return '0x' + paddedAddress
+}
+
+/**
  * Parse and validate the incoming user data payload
  */
 const parseUserDataPayload = (input: Buffer): ValidatedUserDataPayload => {
@@ -107,6 +121,7 @@ const fetchKybVerification = (
 	sendRequester: HTTPSendRequester,
 	config: Config,
 	payload: ValidatedUserDataPayload,
+	accountId: string,
 ): ValidatedKybResponse => {
 	// If no API endpoint configured, use default approval
 	if (!config.kybApi?.apiEndpoint) {
@@ -118,7 +133,7 @@ const fetchKybVerification = (
 	// Prepare request body
 	const requestBody = JSON.stringify({
 		address: payload.address,
-		accountId: payload.accountId,
+		accountId: accountId,
 		company: payload.company,
 	})
 
@@ -156,6 +171,7 @@ const fetchMaxNotional = (
 	sendRequester: HTTPSendRequester,
 	config: Config,
 	payload: ValidatedUserDataPayload,
+	accountId: string,
 ): ValidatedRiskManagementResponse => {
 	// If no API endpoint configured, use default maxNotional
 	if (!config.riskManagementApi?.apiEndpoint) {
@@ -167,7 +183,7 @@ const fetchMaxNotional = (
 	// Prepare request body
 	const requestBody = JSON.stringify({
 		address: payload.address,
-		accountId: payload.accountId,
+		accountId: accountId,
 		company: payload.company,
 	})
 
@@ -211,6 +227,7 @@ const addParticipantToWhitelist = (
 	runtime: Runtime<Config>,
 	evmClient: cre.capabilities.EVMClient,
 	userData: ValidatedUserDataPayload,
+	accountId: string,
 	kybResult: ValidatedKybResponse,
 	maxNotional: bigint,
 ): string => {
@@ -221,7 +238,7 @@ const addParticipantToWhitelist = (
 	// Log the user details
 	runtime.log(`User Details:`)
 	runtime.log(`  Address: ${userData.address}`)
-	runtime.log(`  Account ID: ${userData.accountId}`)
+	runtime.log(`  Account ID: ${accountId}`)
 	runtime.log(`  Type: Company`)
 	runtime.log(`  Company: ${userData.company.companyName}`)
 	runtime.log(`  Registration: ${userData.company.registrationNumber}`)
@@ -251,7 +268,7 @@ const addParticipantToWhitelist = (
 	const callData = encodeAbiParameters(fullAbiParams, [
 		0, // Report type: 0 = add participant
 		userData.address as `0x${string}`,
-		userData.accountId as `0x${string}`,
+		accountId as `0x${string}`,
 		maxNotional,
 		validUntil,
 	])
@@ -294,71 +311,73 @@ const addParticipantToWhitelist = (
 
 // ─── HTTP Trigger Handler ───────────────────────────────────────────────────
 
-const onHTTPTrigger = (
-	runtime: Runtime<Config>,
-	evmClient: cre.capabilities.EVMClient,
-	payload: HTTPPayload,
-): string => {
-	runtime.log('HTTP trigger received for whitelist-user-workflow')
+const createHTTPTriggerHandler = (evmClient: cre.capabilities.EVMClient) => {
+	return (runtime: Runtime<Config>, payload: HTTPPayload): string => {
+		runtime.log('HTTP trigger received for whitelist-user-workflow')
 
-	// Require payload
-	if (!payload.input || payload.input.length === 0) {
-		throw new Error('HTTP trigger payload is required')
-	}
-
-	runtime.log(`Payload bytes: ${payload.input.toString()}`)
-
-	try {
-		// Parse and validate the user data payload
-		const userData = parseUserDataPayload(payload.input)
-
-		runtime.log(`Parsed user data payload: ${safeJsonStringify(userData)}`)
-
-		// Query KYB API for verification using HTTPClient with consensus aggregation
-		const httpCapability = new HTTPClient()
-		
-		const kybResult = httpCapability
-			.sendRequest(
-				runtime,
-				(sendRequester, config) => fetchKybVerification(sendRequester, config as Config, userData),
-				{
-					approved: median,
-					validUntil: median,
-					reason: median,
-				},
-			)(runtime.config)
-			.result() as ValidatedKybResponse
-
-		// Check if approved
-		if (!kybResult.approved) {
-			throw new Error(`KYB verification failed: ${kybResult.reason || 'Not approved'}`)
+		// Require payload
+		if (!payload.input || payload.input.length === 0) {
+			throw new Error('HTTP trigger payload is required')
 		}
 
-		runtime.log(`KYB verified successfully`)
+		runtime.log(`Payload bytes: ${payload.input.toString()}`)
 
-		// Query Risk Management API for maxNotional using HTTPClient with consensus aggregation
-		const riskManagementResult = httpCapability
-			.sendRequest(
-				runtime,
-				(sendRequester, config) => fetchMaxNotional(sendRequester, config as Config, userData),
-				{
-					maxNotional: median,
-					reason: median,
-				},
-			)(runtime.config)
-			.result() as ValidatedRiskManagementResponse
+		try {
+			// Parse and validate the user data payload
+			const userData = parseUserDataPayload(payload.input)
 
-		// Parse maxNotional string to bigint
-		const maxNotional = BigInt(riskManagementResult.maxNotional)
-		runtime.log(`Risk Management: maxNotional fetched successfully`)
+			runtime.log(`Parsed user data payload: ${safeJsonStringify(userData)}`)
 
-		// Execute the add participant transaction
-		const txHash = addParticipantToWhitelist(runtime, evmClient, userData, kybResult, maxNotional)
+			// Generate an accountId from the user's address
+			const accountId = generateAccountId(userData.address)
+			runtime.log(`Generated Account ID: ${accountId}`)
 
-		return `Participant added successfully! TxHash: ${txHash}`
-	} catch (error) {
-		runtime.log(`Error processing user data: ${error}`)
-		throw new Error(`Failed to process user data: ${error}`)
+			// Query KYB API for verification using HTTPClient with consensus aggregation
+			const httpCapability = new HTTPClient()
+			
+			const kybResult = httpCapability
+				.sendRequest(
+					runtime,
+					(sendRequester, config) => fetchKybVerification(sendRequester, config as Config, userData, accountId),
+					{
+						approved: median,
+						validUntil: median,
+						reason: median,
+					},
+				)(runtime.config)
+				.result() as ValidatedKybResponse
+
+			// Check if approved
+			if (!kybResult.approved) {
+				throw new Error(`KYB verification failed: ${kybResult.reason || 'Not approved'}`)
+			}
+
+			runtime.log(`KYB verified successfully`)
+
+			// Query Risk Management API for maxNotional using HTTPClient with consensus aggregation
+			const riskManagementResult = httpCapability
+				.sendRequest(
+					runtime,
+					(sendRequester, config) => fetchMaxNotional(sendRequester, config as Config, userData, accountId),
+					{
+						maxNotional: median,
+						reason: median,
+					},
+				)(runtime.config)
+				.result() as ValidatedRiskManagementResponse
+
+			// Parse maxNotional string to bigint (remove underscores if present)
+			const maxNotional = BigInt(riskManagementResult.maxNotional.replace(/_/g, ''))
+			runtime.log(`Risk Management: maxNotional fetched successfully`)
+
+			// Execute the add participant transaction
+			const txHash = addParticipantToWhitelist(runtime, evmClient, userData, accountId, kybResult, maxNotional)
+
+			return `Participant added successfully! TxHash: ${txHash}`
+		} catch (error) {
+			runtime.log(`Error processing user data: ${error}`)
+			throw new Error(`Failed to process user data: ${error}`)
+		}
 	}
 }
 
@@ -385,7 +404,7 @@ const initWorkflow = (config: Config) => {
 	return [
 		cre.handler(
 			httpTrigger.trigger({}),
-			(runtime, payload) => onHTTPTrigger(runtime, evmClient, payload),
+			createHTTPTriggerHandler(evmClient),
 		),
 	]
 }

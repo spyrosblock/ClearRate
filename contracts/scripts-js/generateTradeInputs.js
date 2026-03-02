@@ -90,10 +90,14 @@ async function main() {
   const tradeId = ethers.keccak256(ethers.randomBytes(32));
 
   // Account IDs (bytes32 format) - Must match exactly how Solidity stores them
-  // WhitelistUsers.s.sol uses: bytes32(vm.envUint("USER1_ACCOUNT_ID"))
-  // So we convert the numeric string to bytes32 directly, NOT keccak256
-  const partyA = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER1_ACCOUNT_ID || "1")), 32);
-  const partyB = ethers.zeroPadValue(ethers.toBeHex(parseInt(env.USER2_ACCOUNT_ID || "2")), 32);
+  // Now using address-based account IDs with left padding of 0s
+  // Convert addresses to bytes32 account IDs (same logic as _addressToAccountId in Solidity)
+  const user1Address = env.USER1_ADDRESS;
+  const user2Address = env.USER2_ADDRESS;
+  
+  // Convert address to uint256 then to bytes32 (left-padded with zeros)
+  const partyA = ethers.zeroPadValue(ethers.toBeHex(BigInt(user1Address)), 32);
+  const partyB = ethers.zeroPadValue(ethers.toBeHex(BigInt(user2Address)), 32);
 
   // Trade terms
   const notional = ethers.parseEther("1000000"); // 1,000,000 USDC
