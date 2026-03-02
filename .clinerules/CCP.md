@@ -105,7 +105,7 @@ Example for how it's supposed to work
 cd contracts && make deploy-contracts-sepolia && cd ..
 ```
 
-2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json` and `store-logs-workflow/config.staging.json` with new addresses)
+2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json`, `store-logs-workflow/config.staging.json` and `whitelist-user-workflow/config.staging.json` with new addresses)
 
 3. Users call the whitelist-user-workflow to get whitelisted
 ```
@@ -142,7 +142,7 @@ cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm
 cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
 ```
 
-10.  The user can withdraw their collateral after the trade is settled
+10. The user can withdraw their collateral after the trade is settled
 ```
 cd contracts && make withdraw-margin-sepolia && cd ..
 ```
