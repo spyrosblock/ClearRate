@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     const settlements: Settlement[] = positions
       .filter((pos) => pos.active) // Only process active positions
       .map((pos) => {
-        const npvChange = 1e18;
+        const npvChange = 10000e18;  // 10k
         
         // Determine if position is matured (for demonstration, positions with maturity < now would be final)
         // In production, you'd check actual timestamps
