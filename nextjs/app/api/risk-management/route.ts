@@ -14,7 +14,17 @@ import { NextRequest, NextResponse } from 'next/server';
  *     registrationNumber: string,
  *     registeredCountry: string,
  *     contactEmail: string,
- *     lei: string
+ *     lei: string,
+ *     website: string,
+ *     uploadedLegalDocs: {
+ *       articlesOfAssociation: string,
+ *       certificateOfIncorporation: string,
+ *       vatCertificate: string
+ *     },
+ *     bankDetails: {
+ *       iban: string,
+ *       bic: string
+ *     }
  *   }
  * }
  * 
@@ -25,12 +35,26 @@ import { NextRequest, NextResponse } from 'next/server';
  * }
  */
 
+interface UploadedLegalDocs {
+  articlesOfAssociation: string;
+  certificateOfIncorporation: string;
+  vatCertificate: string;
+}
+
+interface BankDetails {
+  iban: string;
+  bic: string;
+}
+
 interface CompanyData {
   companyName: string;
   registrationNumber: string;
   registeredCountry: string;
   contactEmail: string;
   lei: string;
+  website: string;
+  uploadedLegalDocs: UploadedLegalDocs;
+  bankDetails: BankDetails;
 }
 
 interface RiskRequest {
@@ -93,6 +117,44 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Validate website
+    if (!company.website) {
+      return NextResponse.json(
+        { maxNotional: '0', reason: 'Missing required company field: website' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate uploaded legal documents
+    if (!company.uploadedLegalDocs) {
+      return NextResponse.json(
+        { maxNotional: '0', reason: 'Missing required company field: uploadedLegalDocs' },
+        { status: 400 }
+      );
+    }
+    if (!company.uploadedLegalDocs.articlesOfAssociation || 
+        !company.uploadedLegalDocs.certificateOfIncorporation || 
+        !company.uploadedLegalDocs.vatCertificate) {
+      return NextResponse.json(
+        { maxNotional: '0', reason: 'Missing required legal documents' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate bank details
+    if (!company.bankDetails) {
+      return NextResponse.json(
+        { maxNotional: '0', reason: 'Missing required company field: bankDetails' },
+        { status: 400 }
+      );
+    }
+    if (!company.bankDetails.iban || !company.bankDetails.bic) {
+      return NextResponse.json(
+        { maxNotional: '0', reason: 'Missing required bank details: iban, bic' },
+        { status: 400 }
+      );
+    }
+    
     // Log the risk assessment request
     console.log('[Risk Management] Assessment request received:');
     console.log('  Address:', address);
@@ -100,6 +162,14 @@ export async function POST(request: NextRequest) {
     console.log('  Company:', company.companyName);
     console.log('  Country:', company.registeredCountry);
     console.log('  LEI:', company.lei);
+    console.log('  Website:', company.website);
+    console.log('  Legal Docs:');
+    console.log('    Articles of Association:', company.uploadedLegalDocs.articlesOfAssociation);
+    console.log('    Certificate of Incorporation:', company.uploadedLegalDocs.certificateOfIncorporation);
+    console.log('    VAT Certificate:', company.uploadedLegalDocs.vatCertificate);
+    console.log('  Bank Details:');
+    console.log('    IBAN:', company.bankDetails.iban);
+    console.log('    BIC:', company.bankDetails.bic);
     
     
     // Return the risk assessment

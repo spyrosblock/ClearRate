@@ -14,7 +14,17 @@ import { NextRequest, NextResponse } from 'next/server';
  *     registrationNumber: string,
  *     registeredCountry: string,
  *     contactEmail: string,
- *     lei: string           // Legal Entity Identifier (20 alphanumeric characters)
+ *     lei: string,          // Legal Entity Identifier (20 alphanumeric characters)
+ *     website: string,      // Company website URL
+ *     uploadedLegalDocs: {
+ *       articlesOfAssociation: string,    // URL to document
+ *       certificateOfIncorporation: string, // URL to document
+ *       vatCertificate: string           // URL to document
+ *     },
+ *     bankDetails: {
+ *       iban: string,
+ *       bic: string
+ *     }
  *   }
  * }
  * 
@@ -85,6 +95,44 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Validate website
+    if (!company.website) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required company field: website' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate uploaded legal documents
+    if (!company.uploadedLegalDocs) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required company field: uploadedLegalDocs' },
+        { status: 400 }
+      );
+    }
+    if (!company.uploadedLegalDocs.articlesOfAssociation || 
+        !company.uploadedLegalDocs.certificateOfIncorporation || 
+        !company.uploadedLegalDocs.vatCertificate) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required legal documents: articlesOfAssociation, certificateOfIncorporation, vatCertificate' },
+        { status: 400 }
+      );
+    }
+    
+    // Validate bank details
+    if (!company.bankDetails) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required company field: bankDetails' },
+        { status: 400 }
+      );
+    }
+    if (!company.bankDetails.iban || !company.bankDetails.bic) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required bank details: iban, bic' },
+        { status: 400 }
+      );
+    }
+    
     // Log the verification request
     console.log('[KYB Mock] Verification request received:');
     console.log('  Address:', address);
@@ -95,6 +143,14 @@ export async function POST(request: NextRequest) {
     console.log('  Country:', company.registeredCountry);
     console.log('  Contact Email:', company.contactEmail);
     console.log('  LEI:', company.lei);
+    console.log('  Website:', company.website);
+    console.log('  Legal Docs:');
+    console.log('    Articles of Association:', company.uploadedLegalDocs.articlesOfAssociation);
+    console.log('    Certificate of Incorporation:', company.uploadedLegalDocs.certificateOfIncorporation);
+    console.log('    VAT Certificate:', company.uploadedLegalDocs.vatCertificate);
+    console.log('  Bank Details:');
+    console.log('    IBAN:', company.bankDetails.iban);
+    console.log('    BIC:', company.bankDetails.bic);
     
     // Calculate validUntil: 1 year from now
     const validUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
