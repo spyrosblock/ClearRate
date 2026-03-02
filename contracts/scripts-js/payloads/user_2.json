@@ -5,6 +5,16 @@
     "registrationNumber": "JJ123456789",
     "registeredCountry": "CA",
     "contactEmail": "jane.johnson@example.com",
-    "lei": "54930012345678901211"
+    "lei": "54930012345678901211",
+    "website": "https://www.janejohnson.com",
+    "uploadedLegalDocs": {
+      "articlesOfAssociation": "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/articles_of_association.pdf",
+      "certificateOfIncorporation": "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/certificate_of_incorporation.pdf",
+      "vatCertificate": "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/vat_certificate.pdf"
+    },
+    "bankDetails": {
+      "iban": "CA3412345678901234567890123",
+      "bic": "BOFMCAM2XXX"
+    }
   }
 }

@@ -29,3 +29,36 @@ CREATE INDEX idx_novated_positions_active ON novated_positions(active) WHERE act
 
 -- Index for maturity date queries
 CREATE INDEX idx_novated_positions_maturity ON novated_positions(maturity_date);
+
+-- Users table - stores user KYB information and company details
+CREATE TABLE users (
+    id                          SERIAL PRIMARY KEY,
+    address                     VARCHAR(42) UNIQUE NOT NULL,          -- Ethereum address (0x + 40 hex chars)
+    account_id                  VARCHAR(66),                          -- bytes32 account ID (optional, set after approval)
+    company_name                VARCHAR(255) NOT NULL,
+    registration_number         VARCHAR(100) UNIQUE NOT NULL,
+    registered_country          VARCHAR(2) NOT NULL,                  -- ISO 3166-1 alpha-2 country code
+    contact_email               VARCHAR(255) NOT NULL,
+    lei                         VARCHAR(20) UNIQUE NOT NULL,          -- Legal Entity Identifier (20 alphanumeric chars)
+    website                     VARCHAR(500) NOT NULL,
+    articles_of_association     VARCHAR(1000),                        -- URL to articles of association
+    certificate_of_incorporation VARCHAR(1000),                       -- URL to certificate of incorporation
+    vat_certificate             VARCHAR(1000),                        -- URL to VAT certificate
+    iban                        VARCHAR(34) NOT NULL,                 -- IBAN (max 34 chars)
+    bic                         VARCHAR(11) NOT NULL,                 -- BIC/SWIFT (8 or 11 chars)
+    approved                    BOOLEAN DEFAULT FALSE,                -- KYB approval status
+    valid_until                 TIMESTAMPTZ,                          -- Approval validity date
+    max_notional                NUMERIC(78, 0) DEFAULT 0,             -- Maximum notional allowed
+    notional                    NUMERIC(78, 0) DEFAULT 0,             -- Current notional used
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for user lookups by address
+CREATE INDEX idx_users_address ON users(address);
+
+-- Index for user lookups by account_id
+CREATE INDEX idx_users_account_id ON users(account_id);
+
+-- Index for approved users
+CREATE INDEX idx_users_approved ON users(approved) WHERE approved = TRUE;

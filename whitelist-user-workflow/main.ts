@@ -12,7 +12,7 @@ import {
 	TxStatus,
 } from '@chainlink/cre-sdk'
 import { Buffer } from 'buffer'
-import { encodeAbiParameters, parseAbiParameters, keccak256, toBytes } from 'viem'
+import { encodeAbiParameters, parseAbiParameters } from 'viem'
 import { z } from 'zod'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
@@ -29,6 +29,9 @@ const configSchema = z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
 	riskManagementApi: z.object({
+		apiEndpoint: z.string(),
+	}).optional(),
+	usersApi: z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
 })
@@ -52,6 +55,16 @@ const userDataPayloadSchema = z.object({
 		registeredCountry: z.string().length(2), // ISO 3166-1 alpha-2
 		contactEmail: z.string().email(),
 		lei: z.string().regex(/^[A-Z0-9]{20}$/, 'Invalid LEI format - must be 20 alphanumeric characters'), // Legal Entity Identifier
+		website: z.string(),
+		uploadedLegalDocs: z.object({
+			articlesOfAssociation: z.string(),
+			certificateOfIncorporation: z.string(),
+			vatCertificate: z.string(),
+		}),
+		bankDetails: z.object({
+			iban: z.string(),
+			bic: z.string(),
+		}),
 	}),
 })
 
@@ -83,6 +96,19 @@ const riskManagementResponseSchema = z.object({
 })
 
 type ValidatedRiskManagementResponse = z.infer<typeof riskManagementResponseSchema>
+
+// ─── Users API Response Schema ──────────────────────────────────────────────
+
+/**
+ * Schema for the Users API response.
+ * API returns success status and userId.
+ */
+const usersResponseSchema = z.object({
+	success: z.boolean(),
+	message: z.string().optional(),
+})
+
+type ValidatedUsersResponse = z.infer<typeof usersResponseSchema>
 
 // ─── Utility Functions ────────────────────────────────────────────────────────
 
@@ -210,6 +236,63 @@ const fetchMaxNotional = (
 
 	// Validate and return the parsed payload
 	return riskManagementResponseSchema.parse(data)
+}
+
+/**
+ * Register user in the Users API after successful whitelisting.
+ * This function is executed by each DON node independently;
+ * results are aggregated via median consensus.
+ */
+const registerUserInApi = (
+	sendRequester: HTTPSendRequester,
+	config: Config,
+	payload: ValidatedUserDataPayload,
+	accountId: string,
+	kybResult: ValidatedKybResponse,
+	maxNotional: bigint,
+): ValidatedUsersResponse => {
+	// If no API endpoint configured, skip registration
+	if (!config.usersApi?.apiEndpoint) {
+		console.log('[DEBUG] No Users API endpoint configured, skipping registration')
+		return {
+			success: true,
+			message: 'Users API not configured, skipping registration',
+		}
+	}
+
+	// Prepare request body - include all user data plus whitelist results
+	const requestBody = JSON.stringify({
+		address: payload.address,
+		accountId: accountId,
+		company: payload.company,
+		approved: kybResult.approved,
+		validUntil: kybResult.validUntil ? new Date(kybResult.validUntil * 1000).toISOString() : null,
+		maxNotional: maxNotional.toString(),
+	})
+
+	// Send request to Users API
+	const response = sendRequester.sendRequest({
+		method: 'POST',
+		url: config.usersApi.apiEndpoint,
+		body: Buffer.from(requestBody).toString('base64'),
+		headers: {
+			'Content-Type': 'application/json',
+		},
+	}).result()
+
+	console.log('[DEBUG] Users API response status:', response.statusCode)
+	console.log('[DEBUG] Users API response body:', JSON.stringify(response.body))
+
+	if (response.statusCode !== 200 && response.statusCode !== 201) {
+		throw new Error(`Users API request failed with status: ${response.statusCode}`)
+	}
+
+	const responseText = Buffer.from(response.body).toString('utf-8')
+	console.log('[DEBUG] Users API response text:', responseText)
+	const data = JSON.parse(responseText)
+
+	// Validate and return the parsed payload
+	return usersResponseSchema.parse(data)
 }
 
 // ─── Core Workflow Logic ───────────────────────────────────────────────────
@@ -372,6 +455,25 @@ const createHTTPTriggerHandler = (evmClient: cre.capabilities.EVMClient) => {
 
 			// Execute the add participant transaction
 			const txHash = addParticipantToWhitelist(runtime, evmClient, userData, accountId, kybResult, maxNotional)
+
+			// Register user in the Users API after successful whitelisting
+			runtime.log(`Registering user in Users API...`)
+			const usersResult = httpCapability
+				.sendRequest(
+					runtime,
+					(sendRequester, config) => registerUserInApi(sendRequester, config as Config, userData, accountId, kybResult, maxNotional),
+					{
+						success: median,
+						message: median,
+					},
+				)(runtime.config)
+				.result() as ValidatedUsersResponse
+
+			if (usersResult.success) {
+				runtime.log(`User registered in Users API successfully`)
+			} else {
+				runtime.log(`Warning: User registration in Users API may have failed: ${usersResult.message || 'Unknown status'}`)
+			}
 
 			return `Participant added successfully! TxHash: ${txHash}`
 		} catch (error) {

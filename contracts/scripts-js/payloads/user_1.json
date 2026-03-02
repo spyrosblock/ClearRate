@@ -5,6 +5,16 @@
     "registrationNumber": "TC123456789",
     "registeredCountry": "DE",
     "contactEmail": "contact@techcorp.com",
-    "lei": "549300KHAXQ1P3T4GJ31"
+    "lei": "549300KHAXQ1P3T4GJ31",
+    "website": "https://www.techcorp.com",
+    "uploadedLegalDocs": {
+      "articlesOfAssociation": "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/articles_of_association.pdf",
+      "certificateOfIncorporation": "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/certificate_of_incorporation.pdf",
+      "vatCertificate": "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/vat_certificate.pdf"
+    },
+    "bankDetails": {
+      "iban": "DE89370400440532013000",
+      "bic": "COBADEFFXXX"
+    }
   }
 }

@@ -15881,6 +15881,9 @@ var configSchema = exports_external.object({
   }).optional(),
   riskManagementApi: exports_external.object({
     apiEndpoint: exports_external.string()
+  }).optional(),
+  usersApi: exports_external.object({
+    apiEndpoint: exports_external.string()
   }).optional()
 });
 var userDataPayloadSchema = exports_external.object({
@@ -15890,7 +15893,17 @@ var userDataPayloadSchema = exports_external.object({
     registrationNumber: exports_external.string().min(1),
     registeredCountry: exports_external.string().length(2),
     contactEmail: exports_external.string().email(),
-    lei: exports_external.string().regex(/^[A-Z0-9]{20}$/, "Invalid LEI format - must be 20 alphanumeric characters")
+    lei: exports_external.string().regex(/^[A-Z0-9]{20}$/, "Invalid LEI format - must be 20 alphanumeric characters"),
+    website: exports_external.string(),
+    uploadedLegalDocs: exports_external.object({
+      articlesOfAssociation: exports_external.string(),
+      certificateOfIncorporation: exports_external.string(),
+      vatCertificate: exports_external.string()
+    }),
+    bankDetails: exports_external.object({
+      iban: exports_external.string(),
+      bic: exports_external.string()
+    })
   })
 });
 var kybResponseSchema = exports_external.object({
@@ -15901,6 +15914,10 @@ var kybResponseSchema = exports_external.object({
 var riskManagementResponseSchema = exports_external.object({
   maxNotional: exports_external.string(),
   reason: exports_external.string().optional()
+});
+var usersResponseSchema = exports_external.object({
+  success: exports_external.boolean(),
+  message: exports_external.string().optional()
 });
 var safeJsonStringify = (obj) => JSON.stringify(obj, (_, value2) => typeof value2 === "bigint" ? value2.toString() : value2, 2);
 var generateAccountId = (address) => {
@@ -15969,6 +15986,40 @@ var fetchMaxNotional = (sendRequester, config, payload, accountId) => {
   console.log("[DEBUG] Risk Management API response text:", responseText);
   const data = JSON.parse(responseText);
   return riskManagementResponseSchema.parse(data);
+};
+var registerUserInApi = (sendRequester, config, payload, accountId, kybResult, maxNotional) => {
+  if (!config.usersApi?.apiEndpoint) {
+    console.log("[DEBUG] No Users API endpoint configured, skipping registration");
+    return {
+      success: true,
+      message: "Users API not configured, skipping registration"
+    };
+  }
+  const requestBody = JSON.stringify({
+    address: payload.address,
+    accountId,
+    company: payload.company,
+    approved: kybResult.approved,
+    validUntil: kybResult.validUntil ? new Date(kybResult.validUntil * 1000).toISOString() : null,
+    maxNotional: maxNotional.toString()
+  });
+  const response = sendRequester.sendRequest({
+    method: "POST",
+    url: config.usersApi.apiEndpoint,
+    body: Buffer2.from(requestBody).toString("base64"),
+    headers: {
+      "Content-Type": "application/json"
+    }
+  }).result();
+  console.log("[DEBUG] Users API response status:", response.statusCode);
+  console.log("[DEBUG] Users API response body:", JSON.stringify(response.body));
+  if (response.statusCode !== 200 && response.statusCode !== 201) {
+    throw new Error(`Users API request failed with status: ${response.statusCode}`);
+  }
+  const responseText = Buffer2.from(response.body).toString("utf-8");
+  console.log("[DEBUG] Users API response text:", responseText);
+  const data = JSON.parse(responseText);
+  return usersResponseSchema.parse(data);
 };
 var addParticipantToWhitelist = (runtime2, evmClient, userData, accountId, kybResult, maxNotional) => {
   const evmConfig = runtime2.config.evms[0];
@@ -16049,6 +16100,16 @@ var createHTTPTriggerHandler = (evmClient) => {
       const maxNotional = BigInt(riskManagementResult.maxNotional.replace(/_/g, ""));
       runtime2.log(`Risk Management: maxNotional fetched successfully`);
       const txHash = addParticipantToWhitelist(runtime2, evmClient, userData, accountId, kybResult, maxNotional);
+      runtime2.log(`Registering user in Users API...`);
+      const usersResult = httpCapability.sendRequest(runtime2, (sendRequester, config) => registerUserInApi(sendRequester, config, userData, accountId, kybResult, maxNotional), {
+        success: median,
+        message: median
+      })(runtime2.config).result();
+      if (usersResult.success) {
+        runtime2.log(`User registered in Users API successfully`);
+      } else {
+        runtime2.log(`Warning: User registration in Users API may have failed: ${usersResult.message || "Unknown status"}`);
+      }
       return `Participant added successfully! TxHash: ${txHash}`;
     } catch (error) {
       runtime2.log(`Error processing user data: ${error}`);

@@ -43,7 +43,17 @@ function generateCompanyInfo(userNumber) {
       registrationNumber: "TC123456789",
       registeredCountry: "DE",
       contactEmail: "contact@techcorp.com",
-      lei: "549300KHAXQ1P3T4GJ31"
+      lei: "549300KHAXQ1P3T4GJ31",
+      website: "https://www.techcorp.com",
+      uploadedLegalDocs: {
+        articlesOfAssociation: "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/articles_of_association.pdf",
+        certificateOfIncorporation: "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/certificate_of_incorporation.pdf",
+        vatCertificate: "https://techcorp-my.sharepoint.com/:b:/g/personal/documents_techcorp_com/EQ123456789abcdef/vat_certificate.pdf"
+      },
+      bankDetails: {
+        iban: "DE89370400440532013000",
+        bic: "COBADEFFXXX"
+      }
     };
   } else {
     return {
@@ -51,7 +61,17 @@ function generateCompanyInfo(userNumber) {
       registrationNumber: "JJ123456789",
       registeredCountry: "CA",
       contactEmail: "jane.johnson@example.com",
-      lei: "549300123456789012"
+      lei: "54930012345678901211",
+      website: "https://www.janejohnson.com",
+      uploadedLegalDocs: {
+        articlesOfAssociation: "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/articles_of_association.pdf",
+        certificateOfIncorporation: "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/certificate_of_incorporation.pdf",
+        vatCertificate: "https://janejohnson-my.sharepoint.com/:b:/g/personal/documents_janejohnson_com/EQ123456789abcdef/vat_certificate.pdf"
+      },
+      bankDetails: {
+        iban: "CA3412345678901234567890123",
+        bic: "BOFMCAM2XXX"
+      }
     };
   }
 }
@@ -74,20 +94,18 @@ async function main() {
     {
       number: 1,
       address: env.USER1_ADDRESS,
-      accountId: env.USER1_ACCOUNT_ID,
       privateKey: env.USER1_PRIVATE_KEY
     },
     {
       number: 2,
       address: env.USER2_ADDRESS,
-      accountId: env.USER2_ACCOUNT_ID,
       privateKey: env.USER2_PRIVATE_KEY
     }
   ];
   
   // Filter out users that don't have all required fields
   const validUsers = users.filter(user => 
-    user.address && user.accountId && user.privateKey
+    user.address && user.privateKey
   );
   
   if (validUsers.length === 0) {
@@ -108,11 +126,6 @@ async function main() {
   validUsers.forEach((user, index) => {
     const companyInfo = generateCompanyInfo(user.number);
     
-    // Convert account ID to bytes32 format (same as generateTradeInputs.js)
-    const accountId = ethers ? 
-      ethers.zeroPadValue(ethers.toBeHex(parseInt(user.accountId)), 32) :
-      "0x" + user.accountId.padStart(64, "0");
-    
     const userData = {
       address: user.address,
       company: companyInfo
@@ -125,7 +138,6 @@ async function main() {
     fs.writeFileSync(outputPath, JSON.stringify(userData, null, 2));
     console.log(`✓ Generated ${filename} for user ${user.number}`);
     console.log(`  Address: ${user.address}`);
-    console.log(`  Account ID: ${accountId}`);
     console.log(`  Company: ${companyInfo.companyName}`);
     console.log(`  Contact Email: ${companyInfo.contactEmail}`);
     console.log(`  Country: ${companyInfo.registeredCountry}`);

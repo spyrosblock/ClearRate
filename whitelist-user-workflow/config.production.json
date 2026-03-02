@@ -11,5 +11,8 @@
   },
   "riskManagementApi": {
     "apiEndpoint": "https://api.production.com/risk-management"
+  },
+  "usersApi": {
+    "apiEndpoint": "https://api.production.com/users"
   }
 }
