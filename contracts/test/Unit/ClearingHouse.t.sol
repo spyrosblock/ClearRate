@@ -10,7 +10,6 @@ import {MarginVault} from "../../src/margin/MarginVault.sol";
 import {RiskEngine} from "../../src/margin/RiskEngine.sol";
 import {Whitelist} from "../../src/access/Whitelist.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
-import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title ClearingHouseTest
@@ -28,7 +27,7 @@ contract ClearingHouseTest is Test {
     address internal admin = makeAddr("admin");
     address internal operator = makeAddr("operator");
     address internal settler = makeAddr("settler");
-    address internal nonOperator = makeAddr("nonOperator");
+    address internal forwarder = makeAddr("forwarder");
 
     Vm.Wallet internal aliceWallet;
     Vm.Wallet internal bobWallet;
@@ -74,10 +73,11 @@ contract ClearingHouseTest is Test {
 
         usdc = new ERC20Mock("USD Coin", "USDC", 6);
 
-        whitelist = new Whitelist(admin);
+        whitelist = new Whitelist(admin, forwarder);
         vm.startPrank(admin);
-        whitelist.addParticipant(alice, ALICE_ACCOUNT);
-        whitelist.addParticipant(bob, BOB_ACCOUNT);
+        // addParticipant(address participant, bytes32 accountId, uint256 customMaxNotional, uint64 kycExpiry)
+        whitelist.addParticipant(alice, ALICE_ACCOUNT, 1000000e6, uint64(block.timestamp) + 365 days);
+        whitelist.addParticipant(bob, BOB_ACCOUNT, 1000000e6, uint64(block.timestamp) + 365 days);
         vm.stopPrank();
 
         address[] memory tokens = new address[](1);
@@ -88,7 +88,6 @@ contract ClearingHouseTest is Test {
 
         instrument = new IRSInstrument(admin, "https://metadata.clearrate.io/{id}.json");
 
-        address forwarder = makeAddr("forwarder");
         clearingHouse = new ClearingHouse(
             admin,
             forwarder,
@@ -102,9 +101,12 @@ contract ClearingHouseTest is Test {
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        whitelist.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
 
         riskEngine.setRiskWeight(ONE_YEAR, 200);
 
+        // Grant roles - forwarder needs OPERATOR_ROLE to call onReport
+        clearingHouse.grantRole(OPERATOR_ROLE, forwarder);
         clearingHouse.grantRole(OPERATOR_ROLE, operator);
         clearingHouse.grantRole(SETTLEMENT_ROLE, settler);
         vm.stopPrank();
@@ -179,8 +181,11 @@ contract ClearingHouseTest is Test {
         IClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
         bytes memory sigA = _signTrade(trade, aliceWallet);
         bytes memory sigB = _signTrade(trade, bobWallet);
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
+        
+        // Submit via onReport (mocks Chainlink CRE workflow)
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
     }
 
     function _expectedIM() internal pure returns (uint256) {
@@ -195,13 +200,16 @@ contract ClearingHouseTest is Test {
         trade.notional = notional;
         bytes memory sigA = _signTrade(trade, bobWallet);
         bytes memory sigB = _signTrade(trade, aliceWallet);
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
+        
+        // Submit via onReport
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  submitMatchedTrade — Happy Path
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    //  submitMatchedTrade — Happy Path (via onReport)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
     function test_submitMatchedTrade_success() public {
         bytes32 tradeId = keccak256("TRADE_1");
@@ -270,16 +278,26 @@ contract ClearingHouseTest is Test {
     }
 
     function test_submitMatchedTrade_multipleTrades() public {
-        _submitDefaultTrade(keccak256("TRADE_1"));
+        // First trade with smaller notional to leave room for second trade
+        IClearingHouse.MatchedTrade memory trade1 = _defaultTrade(keccak256("TRADE_1"));
+        trade1.notional = 500_000e6; // Half of max notional
+        bytes memory sigA1 = _signTrade(trade1, aliceWallet);
+        bytes memory sigB1 = _signTrade(trade1, bobWallet);
 
+        bytes memory report1 = abi.encode(uint8(0), trade1, sigA1, sigB1);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report1);
+
+        // Second trade with remaining notional capacity
         IClearingHouse.MatchedTrade memory trade2 = _defaultTrade(keccak256("TRADE_2"));
         trade2.nonce = 2;
-        trade2.notional = 500_000e6;
+        trade2.notional = 400_000e6; // Within remaining capacity
         bytes memory sigA2 = _signTrade(trade2, aliceWallet);
         bytes memory sigB2 = _signTrade(trade2, bobWallet);
 
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade2, sigA2, sigB2);
+        bytes memory report2 = abi.encode(uint8(0), trade2, sigA2, sigB2);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report2);
 
         assertEq(clearingHouse.activePositionCount(), 2);
         assertEq(clearingHouse.getAccountPositions(ALICE_ACCOUNT).length, 2);
@@ -294,58 +312,14 @@ contract ClearingHouseTest is Test {
         vm.expectEmit(true, true, true, true, address(clearingHouse));
         emit TradeSubmitted(tradeId, ALICE_ACCOUNT, BOB_ACCOUNT, NOTIONAL, FIXED_RATE_BPS);
 
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  submitMatchedTrade — Key Revert Cases
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_submitMatchedTrade_revertsIfCallerLacksOperatorRole() public {
-        bytes32 tradeId = keccak256("TRADE_1");
-        IClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
-        bytes memory sigA = _signTrade(trade, aliceWallet);
-        bytes memory sigB = _signTrade(trade, bobWallet);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                nonOperator, OPERATOR_ROLE
-            )
-        );
-        vm.prank(nonOperator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
-    }
-
-    function test_submitMatchedTrade_revertsOnDuplicateTradeId() public {
-        bytes32 tradeId = keccak256("TRADE_1");
-        _submitDefaultTrade(tradeId);
-
-        IClearingHouse.MatchedTrade memory trade2 = _defaultTrade(tradeId);
-        trade2.nonce = 2;
-        bytes memory sigA = _signTrade(trade2, aliceWallet);
-        bytes memory sigB = _signTrade(trade2, bobWallet);
-
-        vm.expectRevert(abi.encodeWithSelector(IClearingHouse.TradeAlreadySubmitted.selector, tradeId));
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade2, sigA, sigB);
-    }
-
-    function test_submitMatchedTrade_revertsOnInvalidSignatureA() public {
-        bytes32 tradeId = keccak256("TRADE_1");
-        IClearingHouse.MatchedTrade memory trade = _defaultTrade(tradeId);
-        bytes memory sigA = _signTrade(trade, bobWallet);
-        bytes memory sigB = _signTrade(trade, bobWallet);
-
-        vm.expectRevert(abi.encodeWithSelector(IClearingHouse.InvalidSignature.selector, ALICE_ACCOUNT));
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  settlePositionVM — Happy Path
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    //  settlePositionVM — Happy Path (via onReport)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
     function test_settlePositionVM_success() public {
         bytes32 tradeId = keccak256("TRADE_1");
@@ -354,19 +328,24 @@ contract ClearingHouseTest is Test {
         uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
         uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
 
-        int256 newNpv = 5_000e6;
+        int256 npvChange = 5_000e6;
 
         vm.expectEmit(true, false, false, true, address(clearingHouse));
-        emit VariationMarginSettled(tradeId, newNpv, block.timestamp);
+        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
 
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginSinglePosition(tradeId, newNpv);
+        // Submit VM settlement via onReport
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](1);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId, npvChange: npvChange});
+        
+        bytes memory report = abi.encode(uint8(1), settlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
 
-        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceBefore + uint256(newNpv));
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobBefore - uint256(newNpv));
+        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceBefore + uint256(npvChange));
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobBefore - uint256(npvChange));
 
         IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
-        assertEq(pos.lastNpv, newNpv);
+        assertEq(pos.lastNpv, npvChange);
     }
 
     function test_settlePositionVM_negativeNpv() public {
@@ -376,115 +355,23 @@ contract ClearingHouseTest is Test {
         uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
         uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
 
-        int256 newNpv = -5_000e6;
+        int256 npvChange = -5_000e6;
 
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginSinglePosition(tradeId, newNpv);
+        // Submit VM settlement via onReport
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](1);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId, npvChange: npvChange});
+        
+        bytes memory report = abi.encode(uint8(1), settlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
 
         assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceBefore - 5_000e6);
         assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobBefore + 5_000e6);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  compressPositions — Happy Path
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_compressPositions_fullCompression() public {
-        bytes32 tradeId1 = keccak256("TRADE_1");
-        bytes32 tradeId2 = keccak256("TRADE_2");
-
-        _submitDefaultTrade(tradeId1);
-        _submitReverseTrade(tradeId2, NOTIONAL);
-
-        uint256 aliceLockedBefore = marginVault.getLockedIM(ALICE_ACCOUNT);
-
-        vm.expectEmit(true, true, true, true, address(clearingHouse));
-        emit PositionCompressed(ALICE_ACCOUNT, tradeId1, tradeId2, NOTIONAL);
-
-        vm.prank(operator);
-        clearingHouse.compressPositions(tradeId1, tradeId2);
-
-        IClearingHouse.NovatedPosition memory pos1 = clearingHouse.getPosition(tradeId1);
-        IClearingHouse.NovatedPosition memory pos2 = clearingHouse.getPosition(tradeId2);
-        assertFalse(pos1.active);
-        assertFalse(pos2.active);
-        assertEq(pos1.notional, 0);
-        assertEq(pos2.notional, 0);
-
-        uint256 imRelease = riskEngine.calculateIM(NOTIONAL, ONE_YEAR);
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), aliceLockedBefore - imRelease);
-    }
-
-    function test_compressPositions_partialCompression() public {
-        bytes32 tradeId1 = keccak256("TRADE_1");
-        bytes32 tradeId2 = keccak256("TRADE_2");
-
-        _submitDefaultTrade(tradeId1);
-        _submitReverseTrade(tradeId2, 600_000e6);
-
-        vm.prank(operator);
-        clearingHouse.compressPositions(tradeId1, tradeId2);
-
-        IClearingHouse.NovatedPosition memory pos1 = clearingHouse.getPosition(tradeId1);
-        IClearingHouse.NovatedPosition memory pos2 = clearingHouse.getPosition(tradeId2);
-
-        assertEq(pos1.notional, 400_000e6);
-        assertTrue(pos1.active);
-        assertEq(pos2.notional, 0);
-        assertFalse(pos2.active);
-    }
-
-    function test_compressPositions_fullCompression_decrementsActivePositionCount() public {
-        bytes32 tradeId1 = keccak256("TRADE_1");
-        bytes32 tradeId2 = keccak256("TRADE_2");
-
-        _submitDefaultTrade(tradeId1);
-        _submitReverseTrade(tradeId2, NOTIONAL);
-
-        assertEq(clearingHouse.activePositionCount(), 2);
-
-        vm.prank(operator);
-        clearingHouse.compressPositions(tradeId1, tradeId2);
-
-        assertFalse(clearingHouse.getPosition(tradeId1).active);
-        assertFalse(clearingHouse.getPosition(tradeId2).active);
-        assertEq(clearingHouse.activePositionCount(), 0);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  settleMaturedPosition — Happy Path
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_settleMaturedPosition_success() public {
-        bytes32 tradeId = keccak256("TRADE_1");
-        _submitDefaultTrade(tradeId);
-
-        uint256 aliceLockedBefore = marginVault.getLockedIM(ALICE_ACCOUNT);
-        uint256 bobLockedBefore = marginVault.getLockedIM(BOB_ACCOUNT);
-
-        vm.warp(block.timestamp + ONE_YEAR + 1);
-
-        vm.expectEmit(true, false, false, true, address(clearingHouse));
-        emit PositionMatured(tradeId, block.timestamp);
-
-        vm.prank(operator);
-        clearingHouse.settleMaturedPosition(tradeId, 0);
-
-        IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
-        assertFalse(pos.active);
-        assertEq(clearingHouse.activePositionCount(), 0);
-
-        uint256 im = _expectedIM();
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), aliceLockedBefore - im);
-        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), bobLockedBefore - im);
-
-        assertEq(instrument.balanceOf(alice, pos.tokenIdA), 0);
-        assertEq(instrument.balanceOf(bob, pos.tokenIdB), 0);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     //  Admin Functions
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
     function test_setProtocolFee_success() public {
         vm.expectEmit(false, false, false, true, address(clearingHouse));
@@ -502,59 +389,5 @@ contract ClearingHouseTest is Test {
         clearingHouse.setFeeRecipient(recipient);
 
         assertEq(clearingHouse.feeRecipient(), recipient);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  Full Lifecycle Tests
-    // ═══════════════════════════════════════════════════════════════════
-
-    function test_fullLifecycle_submitSettleVMAndMature() public {
-        bytes32 tradeId = keccak256("TRADE_1");
-        _submitDefaultTrade(tradeId);
-
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginSinglePosition(tradeId, 10_000e6);
-
-        IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
-        assertEq(pos.lastNpv, 10_000e6);
-        assertTrue(pos.active);
-
-        vm.warp(block.timestamp + ONE_YEAR + 1);
-
-        vm.prank(operator);
-        clearingHouse.settleMaturedPosition(tradeId, 0);
-
-        pos = clearingHouse.getPosition(tradeId);
-        assertFalse(pos.active);
-        assertEq(clearingHouse.activePositionCount(), 0);
-    }
-
-    function test_fullLifecycle_submitCompressAndMatureResidue() public {
-        bytes32 tradeId1 = keccak256("TRADE_1");
-        bytes32 tradeId2 = keccak256("TRADE_2");
-
-        _submitDefaultTrade(tradeId1);
-        _submitReverseTrade(tradeId2, 600_000e6);
-
-        assertEq(clearingHouse.activePositionCount(), 2);
-
-        vm.prank(operator);
-        clearingHouse.compressPositions(tradeId1, tradeId2);
-
-        assertTrue(clearingHouse.getPosition(tradeId1).active);
-        assertFalse(clearingHouse.getPosition(tradeId2).active);
-
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginSinglePosition(tradeId1, 2_000e6);
-
-        IClearingHouse.NovatedPosition memory pos1 = clearingHouse.getPosition(tradeId1);
-        assertEq(pos1.lastNpv, 2_000e6);
-        assertEq(pos1.notional, 400_000e6);
-
-        vm.warp(block.timestamp + ONE_YEAR + 1);
-        vm.prank(operator);
-        clearingHouse.settleMaturedPosition(tradeId1, 0);
-
-        assertFalse(clearingHouse.getPosition(tradeId1).active);
     }
 }

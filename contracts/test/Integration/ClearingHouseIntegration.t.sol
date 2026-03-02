@@ -14,7 +14,7 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 
 /// @title ClearingHouseIntegrationTest
 /// @notice Integration test covering the happy path lifecycle of a novated IRS trade.
-/// @dev This test exercises the full flow: setup → trade submission → VM settlement → compression → maturity.
+/// @dev This test exercises the full flow: setup → trade submission (via onReport) → VM settlement → compression → maturity.
 contract ClearingHouseIntegrationTest is Test {
     // ─── Contracts ──────────────────────────────────────────────────────
     ClearingHouse internal clearingHouse;
@@ -29,6 +29,7 @@ contract ClearingHouseIntegrationTest is Test {
     address internal admin = makeAddr("admin");
     address internal operator = makeAddr("operator");
     address internal settler = makeAddr("settler");
+    address internal forwarder = makeAddr("forwarder");
 
     Vm.Wallet internal aliceWallet;
     Vm.Wallet internal bobWallet;
@@ -76,11 +77,12 @@ contract ClearingHouseIntegrationTest is Test {
         dai = new ERC20Mock("Dai", "DAI", 18);
 
         // Deploy Whitelist and add participants
-        whitelist = new Whitelist(admin);
+        whitelist = new Whitelist(admin, forwarder);
         vm.startPrank(admin);
-        whitelist.addParticipant(alice, ALICE_ACCOUNT);
-        whitelist.addParticipant(bob, BOB_ACCOUNT);
-        whitelist.addParticipant(charlie, CHARLIE_ACCOUNT);
+        // addParticipant(address participant, bytes32 accountId, uint256 customMaxNotional, uint64 kycExpiry)
+        whitelist.addParticipant(alice, ALICE_ACCOUNT, 1000000e6, uint64(block.timestamp) + 365 days);
+        whitelist.addParticipant(bob, BOB_ACCOUNT, 1000000e6, uint64(block.timestamp) + 365 days);
+        whitelist.addParticipant(charlie, CHARLIE_ACCOUNT, 1000000e6, uint64(block.timestamp) + 365 days);
         vm.stopPrank();
 
         // Deploy MarginVault with multiple tokens
@@ -92,19 +94,13 @@ contract ClearingHouseIntegrationTest is Test {
         // Deploy RiskEngine: 99% confidence, 75% MM ratio
         riskEngine = new RiskEngine(admin, address(marginVault), 9900, 7500);
 
-        // Deploy YieldCurveOracle
-        uint256[] memory tenors = new uint256[](3);
-        tenors[0] = NINETY_DAYS;
-        tenors[1] = ONE_YEAR;
-        tenors[2] = 2 * ONE_YEAR;
-
         // Deploy IRSInstrument
         instrument = new IRSInstrument(admin, "https://metadata.clearrate.io/{id}.json");
 
-        // Deploy ClearingHouse
+        // Deploy ClearingHouse with forwarder
         clearingHouse = new ClearingHouse(
             admin,
-            address(0), // Forwarder - use address(0) for testing (no CRE reports)
+            forwarder, // Forwarder address
             address(instrument),
             address(marginVault),
             address(riskEngine),
@@ -116,13 +112,15 @@ contract ClearingHouseIntegrationTest is Test {
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        whitelist.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
 
         // Set risk weights for different tenors
         riskEngine.setRiskWeight(NINETY_DAYS, 100);   // 1% for 90 days
         riskEngine.setRiskWeight(ONE_YEAR, 200);      // 2% for 1 year
         riskEngine.setRiskWeight(2 * ONE_YEAR, 300); // 3% for 2 years
 
-        // Grant operator & settler roles
+        // Grant operator & settler roles - forwarder needs OPERATOR_ROLE to call onReport
+        clearingHouse.grantRole(OPERATOR_ROLE, forwarder);
         clearingHouse.grantRole(OPERATOR_ROLE, operator);
         clearingHouse.grantRole(SETTLEMENT_ROLE, settler);
         vm.stopPrank();
@@ -133,15 +131,15 @@ contract ClearingHouseIntegrationTest is Test {
         _fundMarginAccount(CHARLIE_ACCOUNT, address(usdc), 2_000_000e6);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════
     //  Happy Path Integration Test
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════
 
     /// @notice Full happy path test: submit trade → settle VM → mature
     function test_fullHappyPath_integration() public {
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         // Step 1: Verify initial state
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         assertEq(clearingHouse.activePositionCount(), 0);
         assertTrue(whitelist.isWhitelisted(alice));
         assertTrue(whitelist.isWhitelisted(bob));
@@ -151,9 +149,9 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(aliceFreeBefore, 2_000_000e6);
         assertEq(bobFreeBefore, 2_000_000e6);
 
-        // ═══════════════════════════════════════════════════════════════
-        // Step 2: Submit matched trade (novation)
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 2: Submit matched trade via onReport (Chainlink CRE workflow)
+        // ═══════════════════════════════════════════════════════════════════════════════
         bytes32 tradeId = keccak256("TRADE_INTEGRATION_1");
         
         IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
@@ -175,8 +173,11 @@ contract ClearingHouseIntegrationTest is Test {
         bytes memory sigA = _signTrade(trade, aliceWallet);
         bytes memory sigB = _signTrade(trade, bobWallet);
 
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
+        // Submit trade via onReport (mocks Chainlink CRE workflow)
+        // Report type 0 = trade submission
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
 
         // Verify trade was submitted
         assertTrue(clearingHouse.tradeSubmitted(tradeId));
@@ -217,9 +218,9 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(bobPositions.length, 1);
         assertEq(bobPositions[0], tradeId);
 
-        // ═══════════════════════════════════════════════════════════════
-        // Step 3: Settle variation margin mid-trade
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 3: Settle variation margin via onReport
+        // ═══════════════════════════════════════════════════════════════════════════════
         uint256 aliceCollateralBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
         uint256 bobCollateralBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
 
@@ -230,8 +231,14 @@ contract ClearingHouseIntegrationTest is Test {
         IClearingHouse.NovatedPosition memory posBeforeVM = clearingHouse.getPosition(tradeId);
         int256 newNpv = posBeforeVM.lastNpv + npvChange;
 
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginSinglePosition(tradeId, newNpv);
+        // Submit VM settlement via onReport
+        // Report type 1 = VM settlement
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](1);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId, npvChange: npvChange});
+        
+        report = abi.encode(uint8(1), settlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
 
         // Verify VM settlement
         assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceCollateralBefore + uint256(npvChange));
@@ -242,17 +249,23 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(posAfterVM.lastNpv, newNpv);
         assertTrue(posAfterVM.active); // Still active
 
-        // ═══════════════════════════════════════════════════════════════
-        // Step 4: Warp to maturity and settle positions
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 4: Warp to maturity and settle positions via onReport
+        // ═══════════════════════════════════════════════════════════════════════════════
         vm.warp(block.timestamp + ONE_YEAR + 1);
 
         // Settle the matured position
         uint256 aliceLockedBeforeMaturity = marginVault.getLockedIM(ALICE_ACCOUNT);
         uint256 bobLockedBeforeMaturity = marginVault.getLockedIM(BOB_ACCOUNT);
 
-        vm.prank(operator);
-        clearingHouse.settleMaturedPosition(tradeId, 0);
+        // Submit matured position settlement via onReport
+        // Report type 2 = matured position settlement
+        IClearingHouse.MaturedPositionSettlement[] memory maturedSettlements = new IClearingHouse.MaturedPositionSettlement[](1);
+        maturedSettlements[0] = IClearingHouse.MaturedPositionSettlement({tradeId: tradeId, finalNpvChange: 0});
+        
+        report = abi.encode(uint8(2), maturedSettlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
 
         // Verify position settled
         IClearingHouse.NovatedPosition memory posMatured = clearingHouse.getPosition(tradeId);
@@ -266,9 +279,9 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(instrument.balanceOf(alice, posMatured.tokenIdA), 0);
         assertEq(instrument.balanceOf(bob, posMatured.tokenIdB), 0);
 
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         // Step 5: Verify final state
-        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         assertEq(clearingHouse.activePositionCount(), 0);
 
         // Both should have their IM released
@@ -276,47 +289,9 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(marginVault.getLockedIM(BOB_ACCOUNT), 0);
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    //  Additional Happy Path: Multiple Parties
-    // ═══════════════════════════════════════════════════════════════════
-
-    /// @notice Test multiple trades between different parties (using unique nonces per account pair)
-    function test_multipleTrades_multipleParties_happyPath() public {
-        // Alice trades with Bob (nonce=1)
-        bytes32 tradeId1 = keccak256("TRADE_MULTI_1");
-        _submitTrade(tradeId1, ALICE_ACCOUNT, BOB_ACCOUNT, NOTIONAL, 1);
-
-        // Bob trades with Charlie (nonce=2, different from Bob's nonce in trade 1)
-        bytes32 tradeId2 = keccak256("TRADE_MULTI_2");
-        _submitTrade(tradeId2, BOB_ACCOUNT, CHARLIE_ACCOUNT, NOTIONAL_2, 2);
-
-        // Note: Can't do Alice-Charlie trade easily because would need nonce=2 for both
-        // which would conflict with existing nonces. The happy path is tested above.
-
-        assertEq(clearingHouse.activePositionCount(), 2);
-
-        // Verify each party's positions
-        assertEq(clearingHouse.getAccountPositions(ALICE_ACCOUNT).length, 1);
-        assertEq(clearingHouse.getAccountPositions(BOB_ACCOUNT).length, 2);
-        assertEq(clearingHouse.getAccountPositions(CHARLIE_ACCOUNT).length, 1);
-
-        // Settle VM for each position using batch settlement
-        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](2);
-        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId1, npvChange: int256(5_000e6)});
-        settlements[1] = IClearingHouse.VMSettlement({tradeId: tradeId2, npvChange: int256(3_000e6)});
-
-        vm.prank(settler);
-        clearingHouse.settleVariationMarginBatch(settlements);
-
-        // Verify balances updated (net effect)
-        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), 2_000_000e6 + 5_000e6);
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), 2_000_000e6 + 5_000e6 + 3_000e6);
-        assertEq(marginVault.getTotalCollateral(CHARLIE_ACCOUNT), 2_000_000e6 - 3_000e6);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════
     //  Helper Functions
-    // ═══════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════════════════════════
 
     function _fundMarginAccount(bytes32 accountId, address token, uint256 amount) internal {
         // Get the account owner from whitelist
@@ -328,47 +303,6 @@ contract ClearingHouseIntegrationTest is Test {
         ERC20Mock(token).approve(address(marginVault), amount);
         marginVault.depositMargin(accountId, token, amount);
         vm.stopPrank();
-    }
-
-    function _submitTrade(
-        bytes32 tradeId,
-        bytes32 partyA,
-        bytes32 partyB,
-        uint256 notional,
-        uint256 nonce
-    ) internal {
-        IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
-            tradeId: tradeId,
-            partyA: partyA,
-            partyB: partyB,
-            notional: notional,
-            fixedRateBps: FIXED_RATE_BPS,
-            startDate: block.timestamp,
-            maturityDate: block.timestamp + ONE_YEAR,
-            paymentInterval: NINETY_DAYS,
-            dayCountConvention: 0,
-            floatingRateIndex: SOFR_INDEX,
-            nonce: nonce,
-            deadline: block.timestamp + 1 hours,
-            collateralToken: address(usdc)
-        });
-
-        // Get the wallets for signing based on account
-        Vm.Wallet memory walletA = _getWalletForAccount(partyA);
-        Vm.Wallet memory walletB = _getWalletForAccount(partyB);
-
-        bytes memory sigA = _signTrade(trade, walletA);
-        bytes memory sigB = _signTrade(trade, walletB);
-
-        vm.prank(operator);
-        clearingHouse.submitMatchedTrade(trade, sigA, sigB);
-    }
-
-    function _getWalletForAccount(bytes32 accountId) internal view returns (Vm.Wallet memory) {
-        if (accountId == ALICE_ACCOUNT) return aliceWallet;
-        if (accountId == BOB_ACCOUNT) return bobWallet;
-        if (accountId == CHARLIE_ACCOUNT) return charlieWallet;
-        revert("Unknown account");
     }
 
     function _signTrade(

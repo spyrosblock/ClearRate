@@ -39,7 +39,6 @@ The workflow stores data to the `novated_positions` table defined in `db/init/01
 | party_a | VARCHAR(66) | bytes32 account ID (pays fixed) |
 | party_b | VARCHAR(66) | bytes32 account ID (receives fixed) |
 | notional | NUMERIC(78,0) | Current notional amount |
-| original_notional | NUMERIC(78,0) | Original notional at novation |
 | fixed_rate_bps | INTEGER | Fixed rate in basis points |
 | start_date | TIMESTAMPTZ | Swap effective date |
 | maturity_date | TIMESTAMPTZ | Swap maturity date |
@@ -92,7 +91,6 @@ The workflow stores data to the `novated_positions` table defined in `db/init/01
   "partyA": "0x...",
   "partyB": "0x...",
   "notional": "1000000000000000000",
-  "originalNotional": "1000000000000000000",
   "fixedRateBps": "350",
   "startDate": "1772016961",
   "maturityDate": "1803552961",

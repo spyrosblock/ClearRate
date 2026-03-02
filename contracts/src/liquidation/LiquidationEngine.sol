@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -110,10 +110,11 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
 
     // ─── Liquidation Functions ──────────────────────────────────────────
 
-    /// @notice Start a liquidation auction for an undercollateralized account.
+    /// @notice Start a liquidation auction for an undercollateralized account for a specific collateral token.
     /// @param accountId The account to liquidate.
-    function liquidateAccount(bytes32 accountId) external {
-        if (!riskEngine.isLiquidatable(accountId)) {
+    /// @param collateralToken The collateral token to liquidate against.
+    function liquidateAccount(bytes32 accountId, address collateralToken) external {
+        if (!riskEngine.isLiquidatable(accountId, collateralToken)) {
             revert AccountNotLiquidatable(accountId);
         }
         if (auctions[accountId].active) {
@@ -122,9 +123,9 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
 
         // Calculate the debt (MM shortfall)
         // Debt must consider locked IM which is not immediately available
-        uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
-        uint256 lockedIM = riskEngine.accountInitialMargin(accountId);
-        uint256 mm = riskEngine.accountMaintenanceMargin(accountId);
+        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
+        uint256 lockedIM = riskEngine.accountInitialMargin(accountId, collateralToken);
+        uint256 mm = riskEngine.accountMaintenanceMargin(accountId, collateralToken);
         // Available collateral = totalCollateral - lockedIM
         // Debt = MM - availableCollateral = MM - (totalCollateral - lockedIM)
         uint256 availableCollateral = totalCollateral > lockedIM ? totalCollateral - lockedIM : 0;

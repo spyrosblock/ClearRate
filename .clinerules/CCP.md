@@ -107,12 +107,12 @@ cd contracts && make deploy-contracts-sepolia && cd ..
 
 2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json` and `store-logs-workflow/config.staging.json` with new addresses)
 
-3. Deployer whitelists the user addresses
+3. Users call the whitelist-user-workflow to get whitelisted
 ```
-cd contracts && make whitelist-users-sepolia && cd ..
+cd whitelist-user-workflow && bun install && cd .. && cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/user_1.json)" --non-interactive --trigger-index 0 && cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/user_2.json)" --non-interactive --trigger-index 0
 ```
 
-4. Users deposit collateral
+4. Mint mock tokens and deposit collateral
 ```
 cd contracts && make deposit-margin-sepolia && cd ..
 ```
@@ -124,7 +124,7 @@ cd contracts && make create-trade-sepolia && cd ..
 
 6. Call the cre api to create the swap
 ```
-cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/trade.json)" --non-interactive --trigger-index 0
+cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/trade.json)" --non-interactive --trigger-index 0
 ```
 
 7. The PositionNovated event log triggers the store-logs-workflow (event number 9 - 0-based)

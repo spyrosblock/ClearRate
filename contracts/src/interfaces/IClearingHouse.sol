@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 /// @title IClearingHouse
@@ -9,7 +9,7 @@ interface IClearingHouse {
 
     /// @notice A matched trade agreement signed by both parties.
     struct MatchedTrade {
-        bytes32 tradeId;            // Unique trade identifier
+        bytes32 tradeId;           // Unique trade identifier
         bytes32 partyA;            // AccountId of party A (pays fixed)
         bytes32 partyB;            // AccountId of party B (receives fixed)
         uint256 notional;          // Notional amount
@@ -32,7 +32,6 @@ interface IClearingHouse {
         bytes32 partyA;
         bytes32 partyB;
         uint256 notional;           // Current notional (may be reduced after compression)
-        uint256 originalNotional;   // Original notional at novation (for correct token burn)
         uint256 fixedRateBps;
         uint256 startDate;
         uint256 maturityDate;
@@ -51,6 +50,21 @@ interface IClearingHouse {
     struct MaturedPositionSettlement {
         bytes32 tradeId;            // Unique trade identifier
         int256 finalNpvChange;     // Final NPV change to settle (from fixed payer's perspective)
+    }
+
+    /// @notice New compressed position to be created during compression.
+    struct NewCompressedPosition {
+        bytes32 tradeId;           // New trade ID for the compressed position
+        bytes32 partyA;            // AccountId of party A (pays fixed)
+        bytes32 partyB;            // AccountId of party B (receives fixed)
+        uint256 notional;          // New notional amount (reduced)
+        uint256 fixedRateBps;      // Fixed rate in basis points
+        uint256 startDate;         // Swap effective date
+        uint256 maturityDate;      // Swap maturity date
+        uint256 paymentInterval;   // Payment frequency in seconds
+        uint8 dayCountConvention;  // Day-count convention
+        bytes32 floatingRateIndex; // Floating rate index identifier
+        address collateralToken;   // Collateral token for the position
     }
 
     // ─── Events ─────────────────────────────────────────────────────────
@@ -98,6 +112,8 @@ interface IClearingHouse {
     error SignatureExpired(uint256 deadline);
     error NonceAlreadyUsed(bytes32 accountId, uint256 nonce);
     error PartyNotWhitelisted(bytes32 accountId);
+    error KycExpired(bytes32 accountId, uint64 expiry);
+    error ExceedsMaxNotional(bytes32 accountId, uint256 requested, uint256 currentTotal, uint256 maxAllowed);
     error InsufficientMarginForTrade(bytes32 accountId);
     error PositionNotActive(bytes32 tradeId);
     error PositionNotMatured(bytes32 tradeId);

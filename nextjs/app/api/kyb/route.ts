@@ -1,30 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Mock KYC Verification API
+ * Whitelist API
  * 
- * This endpoint approves every user with tier 3 (Institutional)
- * It accepts company data and returns whitelist parameters.
+ * This endpoint validates company data and returns approval status with validity period.
  * 
  * Request body:
  * {
  *   address: string,        // Ethereum address
- *   accountId: string,      // Account ID
+ *   accountId: string,      // Account ID (bytes32 hex)
  *   company: {              // Required company data
  *     companyName: string,
  *     registrationNumber: string,
  *     registeredCountry: string,
- *     contactEmail: string
+ *     contactEmail: string,
+ *     lei: string           // Legal Entity Identifier (20 alphanumeric characters)
  *   }
  * }
  * 
  * Response:
  * {
  *   approved: boolean,
- *   tier: number,
- *   customMaxNotional?: string,
- *   kycExpiry?: number,     // Unix timestamp
- *   reason?: string
+ *   validUntil: number,     // Unix timestamp for whitelist expiry
+ *   reason?: string         // Only present if not approved
  * }
  */
 export async function POST(request: NextRequest) {
@@ -73,8 +71,22 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Validate LEI (Legal Entity Identifier) - 20 alphanumeric characters
+    if (!company.lei) {
+      return NextResponse.json(
+        { approved: false, reason: 'Missing required company field: lei' },
+        { status: 400 }
+      );
+    }
+    if (!/^[A-Z0-9]{20}$/.test(company.lei)) {
+      return NextResponse.json(
+        { approved: false, reason: 'Invalid LEI format - must be 20 alphanumeric characters' },
+        { status: 400 }
+      );
+    }
+    
     // Log the verification request
-    console.log('[KYC Mock] Verification request received:');
+    console.log('[KYB Mock] Verification request received:');
     console.log('  Address:', address);
     console.log('  Account ID:', accountId);
     console.log('  Type: Company');
@@ -82,30 +94,23 @@ export async function POST(request: NextRequest) {
     console.log('  Registration:', company.registrationNumber);
     console.log('  Country:', company.registeredCountry);
     console.log('  Contact Email:', company.contactEmail);
+    console.log('  LEI:', company.lei);
     
-    // Mock KYC verification - always approve with tier 3
-    // Tier 3 = Institutional - $10M max notional
-    const oneYearFromNow = Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60);
+    // Calculate validUntil: 1 year from now
+    const validUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
     
-    // Tier 3 default max notional is 10_000_000 * 1e18 (as per Whitelist.sol)
-    const maxNotional = (10_000_000 * 1_000_000_000_000_000_000).toString();
-    
+    // All valid requests are approved
     const response = {
       approved: true,
-      tier: 3,
-      customMaxNotional: maxNotional,
-      kycExpiry: oneYearFromNow,
+      validUntil,
     };
     
-    console.log('[KYC Mock] Verification approved:');
-    console.log('  Tier:', response.tier);
-    console.log('  Max Notional:', response.customMaxNotional);
-    console.log('  KYC Expiry:', new Date(response.kycExpiry * 1000).toISOString());
+    console.log('[KYB Mock] Verification approved, validUntil:', new Date(validUntil * 1000).toISOString());
     
     return NextResponse.json(response);
     
   } catch (error) {
-    console.error('[KYC Mock] Error processing request:', error);
+    console.error('[KYB Mock] Error processing request:', error);
     return NextResponse.json(
       { approved: false, reason: 'Internal server error' },
       { status: 500 }

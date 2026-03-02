@@ -48,7 +48,7 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "Update 'contracts/.env', 'create-trade-workflow/config.staging.json', 'settle-vm-workflow/config.staging.json' and 'store-logs-workflow/config.staging.json' with new addresses"
+	@echo "Update 'contracts/.env', 'create-trade-workflow/config.staging.json', 'settle-vm-workflow/config.staging.json', 'store-logs-workflow/config.staging.json', 'whitelist-user-workflow/config.staging.json' with new addresses"
 
 
 # ============================================
@@ -68,10 +68,10 @@ whitelist-users-sepolia:
 # MARGIN DEPOSITS & WITHDRAWALS
 # ============================================
 
-# Deposit margin for 2 users on Sepolia
+# Mint mock tokens and deposit margin for 2 users on Sepolia
 deposit-margin-sepolia:
 	@echo "Depositing margin for 2 users on Ethereum Sepolia..."
-	@forge script script/DepositMargin.s.sol:DepositMargin \
+	@forge script script/MintAndDepositMargin.s.sol:MintAndDepositMargin \
 		--rpc-url sepolia \
 		--broadcast \
 		-vv

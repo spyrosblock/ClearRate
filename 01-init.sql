@@ -10,7 +10,6 @@ CREATE TABLE novated_positions (
     party_a         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (pays fixed)
     party_b         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (receives fixed)
     notional        NUMERIC(78, 0) NOT NULL,               -- Current notional amount (may be reduced after compression)
-    original_notional NUMERIC(78, 0) NOT NULL,             -- Original notional at novation
     fixed_rate_bps  INTEGER NOT NULL,                       -- Fixed rate in basis points
     start_date      TIMESTAMPTZ NOT NULL,                  -- Swap effective date
     maturity_date   TIMESTAMPTZ NOT NULL,                  -- Swap maturity date

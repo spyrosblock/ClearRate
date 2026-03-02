@@ -1,0 +1,15 @@
+{
+  "evms": [
+    {
+      "whitelistAddress": "0xE1E06557332c88edC19F25b83586Cb7408Be3dF2",
+      "chainSelectorName": "ethereum-mainnet",
+      "gasLimit": "500000"
+    }
+  ],
+  "kybApi": {
+    "apiEndpoint": "https://api.production.com/kyb"
+  },
+  "riskManagementApi": {
+    "apiEndpoint": "https://api.production.com/risk-management"
+  }
+}

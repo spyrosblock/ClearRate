@@ -10,7 +10,6 @@ import {
 } from '@chainlink/cre-sdk'
 import { encodeAbiParameters, parseAbiParameters } from 'viem'
 import { z } from 'zod'
-import './abi'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
 

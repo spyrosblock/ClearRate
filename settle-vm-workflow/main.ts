@@ -5,21 +5,17 @@ import {
 	handler,
 	CronCapability,
 	EVMClient,
-	encodeCallMsg,
 	getNetwork,
 	HTTPClient,
 	type HTTPSendRequester,
 	hexToBase64,
-	LAST_FINALIZED_BLOCK_NUMBER,
 	median,
 	Runner,
 	type Runtime,
 	TxStatus,
 } from '@chainlink/cre-sdk'
-import { type Address, decodeFunctionResult, encodeAbiParameters, encodeFunctionData, parseAbiParameters, toHex, zeroAddress } from 'viem'
+import { type Address, encodeAbiParameters, parseAbiParameters } from 'viem'
 import { z } from 'zod'
-import './abi'
-import { ClearingHouseFullABI } from './abi/ClearingHouse'
 
 // ─── Configuration Schema ───────────────────────────────────────────────────
 
@@ -112,7 +108,6 @@ interface PositionData {
 	partyA: string
 	partyB: string
 	notional: string
-	originalNotional: string
 	fixedRateBps: string
 	startDate: string
 	maturityDate: string
@@ -132,7 +127,6 @@ const novatedPositionsResponseSchema = z.array(
 		party_a: z.string(),
 		party_b: z.string(),
 		notional: z.string(),
-		original_notional: z.string(),
 		fixed_rate_bps: z.number(),
 		start_date: z.string(),
 		maturity_date: z.string(),
@@ -143,7 +137,6 @@ const novatedPositionsResponseSchema = z.array(
 	}),
 )
 
-type NovatedPositionsResponse = z.infer<typeof novatedPositionsResponseSchema>
 
 /**
  * Response wrapper for positions to enable proper consensus aggregation.
@@ -199,7 +192,6 @@ const fetchPositionsFromAPI = (
 			partyA: pos.party_a,
 			partyB: pos.party_b,
 			notional: pos.notional,
-			originalNotional: pos.original_notional,
 			fixedRateBps: pos.fixed_rate_bps.toString(),
 			startDate: pos.start_date,
 			maturityDate: pos.maturity_date,
@@ -245,39 +237,6 @@ const fetchVMSettlementDataWithPositions = (
 		headers: {
 			'Content-Type': 'application/json',
 		},
-	}).result()
-
-	console.log('[DEBUG] Response status:', response.statusCode)
-	console.log('[DEBUG] Response body:', JSON.stringify(response.body))
-
-	if (response.statusCode !== 200) {
-		throw new Error(`VM Settlement API request failed with status: ${response.statusCode}`)
-	}
-
-	const responseText = Buffer.from(response.body).toString('utf-8')
-	console.log('[DEBUG] Response text:', responseText)
-	const data = JSON.parse(responseText)
-
-	// Validate and return the parsed payload
-	return vmSettlementPayloadSchema.parse(data)
-}
-
-/**
- * Fetch VM settlement data from the configured API endpoint (legacy GET method).
- * This function is executed by each DON node independently;
- * results are aggregated via median consensus.
- */
-const fetchVMSettlementData = (
-	sendRequester: HTTPSendRequester,
-	config: Config,
-): ValidatedVMSettlementPayload => {
-	if (!config.vmSettlement?.apiEndpoint) {
-		throw new Error('VM Settlement API endpoint is not configured')
-	}
-
-	const response = sendRequester.sendRequest({
-		method: 'GET',
-		url: config.vmSettlement.apiEndpoint,
 	}).result()
 
 	console.log('[DEBUG] Response status:', response.statusCode)

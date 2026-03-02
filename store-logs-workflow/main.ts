@@ -47,7 +47,6 @@ type NovatedPositionPayload = {
 	partyA: string
 	partyB: string
 	notional: string
-	originalNotional: string
 	fixedRateBps: string
 	startDate: string
 	maturityDate: string
@@ -163,7 +162,6 @@ const onLogTrigger = (runtime: Runtime<Config>, log: EVMLog): string => {
 		)
 
 		// Prepare the payload with data from the event
-		// Note: originalNotional equals notional at novation time, lastNpv is 0 as it's calculated later
 		const payload: NovatedPositionPayload = {
 			action: 'TradeNovated',
 			tradeId,
@@ -172,7 +170,6 @@ const onLogTrigger = (runtime: Runtime<Config>, log: EVMLog): string => {
 			partyA,
 			partyB,
 			notional: notional.toString(),
-			originalNotional: notional.toString(), // At novation, originalNotional = notional
 			fixedRateBps: fixedRateBps.toString(),
 			startDate: startDate.toString(),
 			maturityDate: maturityDate.toString(),

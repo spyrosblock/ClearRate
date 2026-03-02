@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -27,9 +27,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     bytes32 public constant MATCHED_TRADE_TYPEHASH = keccak256(
         "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline,address collateralToken)"
     );
-
-    // ─── Struct Aliases ─────────────────────────────────────────────────
-    // Using IClearingHouse structs directly via inheritance
 
     // ─── State ──────────────────────────────────────────────────────────
 
@@ -60,12 +57,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @notice Protocol fee recipient address.
     address public feeRecipient;
 
-    // ─── Events ─────────────────────────────────────────────────────────
-    // Events inherited from IClearingHouse
-
-    // ─── Errors ─────────────────────────────────────────────────────────
-    // Errors inherited from IClearingHouse
-
     // ─── Constructor ────────────────────────────────────────────────────
 
     /// @notice Deploy the ClearingHouse.
@@ -93,162 +84,30 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         whitelist = Whitelist(whitelist_);
     }
 
-    // ─── Trade Submission ───────────────────────────────────────────────
+    // ─── External Functions ─────────────────────────────────────────────
 
-    /// @notice Submit a matched trade with EIP-712 signatures from both parties.
-    /// @param trade The matched trade details.
-    /// @param sigA Signature from party A.
-    /// @param sigB Signature from party B.
-    function submitMatchedTrade(
-        MatchedTrade calldata trade,
-        bytes calldata sigA,
-        bytes calldata sigB
-    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
-        _executeMatchedTrade(trade, sigA, sigB);
-    }
-
-    // ─── Variation Margin Settlement ────────────────────────────────────
-
-    /// @param tradeId The unique identifier of the position to settle.
-    /// @param npvChange The NPV change from the fixed payer's perspective.
-    function settleVariationMarginSinglePosition(
-        bytes32 tradeId,
-        int256 npvChange
-    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
-        _settleVariationMargin(tradeId, npvChange);
-    }
-
-    /// @notice Settle variation margin for a batch of positions.
-    /// @dev Called by a keeper or CRE workflow with fresh NPV calculations.
-    /// @param settlements Array of VM settlement entries.
-    function settleVariationMarginBatch(
-        VMSettlement[] calldata settlements
-    ) external nonReentrant onlyRole(SETTLEMENT_ROLE) {
-        _executeVMSettlement(settlements);
-    }
-
-    // ─── Position Compression ───────────────────────────────────────────
-
-    /// @notice Compress two offsetting positions for the same account.
-    /// @dev Both positions must involve the same account and have opposite directions.
-    ///      The notional of both is reduced by the minimum of the two.
-    /// @param tradeIdA First trade ID.
-    /// @param tradeIdB Second trade ID.
+    /// @notice Compress positions by deleting old positions and creating new compressed ones.
+    /// @notice Works for many positions and users.
+    /// @notice All positions that are compressed must be for the same token. (Enforced externally)
+    /// @param oldPositions Array of old position trade IDs to be deleted
+    /// @param newPositions Array of new compressed positions to be created
+    /// @param newIMs Array of initial margin values for each new position.
+    /// Tenors might not be standard so we need to calculate the newIMs offchain
     function compressPositions(
-        bytes32 tradeIdA,
-        bytes32 tradeIdB
-    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
-        NovatedPosition storage posA = positions[tradeIdA];
-        NovatedPosition storage posB = positions[tradeIdB];
-
-        if (!posA.active || !posB.active) revert PositionNotActive(tradeIdA);
-
-        // Find the common account
-        bytes32 commonAccount;
-        if (posA.partyA == posB.partyB) {
-            commonAccount = posA.partyA;
-        } else if (posA.partyB == posB.partyA) {
-            commonAccount = posA.partyB;
-        } else {
-            revert PositionsNotCompressible();
+        bytes32[] calldata oldPositions,
+        NewCompressedPosition[] calldata newPositions,
+        uint256[] calldata newIMs
+    ) external onlyRole(OPERATOR_ROLE) {
+        // Delete all old positions first
+        for (uint256 i = 0; i < oldPositions.length; i++) {
+            _deletePosition(oldPositions[i]);
         }
 
-        // Determine compression amount (minimum notional)
-        uint256 compressionAmount = posA.notional < posB.notional
-            ? posA.notional
-            : posB.notional;
-
-        // Reduce notionals
-        posA.notional -= compressionAmount;
-        posB.notional -= compressionAmount;
-
-        // Deactivate fully compressed positions and update counter
-        if (posA.notional == 0) {
-            posA.active = false;
-            --activePositionCount;
+        // Create all new compressed positions
+        for (uint256 i = 0; i < newPositions.length; i++) {
+            _createCompressedPosition(newPositions[i], newIMs[i]);
         }
-        if (posB.notional == 0) {
-            posB.active = false;
-            --activePositionCount;
-        }
-
-        // Release IM proportionally
-        uint256 tenor = posA.maturityDate - posA.startDate;
-        uint256 imRelease = riskEngine.calculateIM(compressionAmount, tenor);
-        marginVault.releaseInitialMargin(commonAccount, posA.collateralToken, imRelease);
-        
-        // Update Maintenance Margin after position compression
-        _updateAccountMaintenanceMargin(commonAccount);
-
-        emit PositionCompressed(commonAccount, tradeIdA, tradeIdB, compressionAmount);
     }
-
-    // ─── Position Maturity ──────────────────────────────────────────────
-
-    /// @notice Settle a matured position and release locked margin.
-    /// @param tradeId The trade that has matured.
-    /// @param finalNpvChange The final NPV change to settle (from fixed payer's perspective).
-    function settleMaturedPosition(
-        bytes32 tradeId,
-        int256 finalNpvChange
-    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
-        _settleSingleMaturedPosition(tradeId, finalNpvChange);
-    }
-
-    /// @notice Settle multiple matured positions in a batch.
-    /// @param settlements Array of matured position settlement entries.
-    function settleMaturedPositionsBatch(
-        MaturedPositionSettlement[] calldata settlements
-    ) external nonReentrant onlyRole(OPERATOR_ROLE) {
-        _executeMaturedPositionSettlement(settlements);
-    }
-
-    /// @dev Settle a single matured position and release locked margin.
-    /// @param tradeId The trade that has matured.
-    /// @param finalNpvChange The final NPV change to settle (from fixed payer's perspective).
-    function _settleSingleMaturedPosition(
-        bytes32 tradeId,
-        int256 finalNpvChange
-    ) internal {
-        NovatedPosition storage pos = positions[tradeId];
-        if (!pos.active) revert PositionNotActive(tradeId);
-        // TODO: enable this in production
-        // if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
-
-        // Settle final variation margin before closing position
-        if (finalNpvChange != 0) {
-            _settleVariationMargin(tradeId, finalNpvChange);
-        }
-
-        pos.active = false;
-        --activePositionCount;
-
-        // Release IM for both parties
-        uint256 tenor = pos.maturityDate - pos.startDate;
-        uint256 imRelease = riskEngine.calculateIM(pos.notional, tenor);
-
-        marginVault.releaseInitialMargin(pos.partyA, pos.collateralToken, imRelease);
-        marginVault.releaseInitialMargin(pos.partyB, pos.collateralToken, imRelease);
-
-        // Update Maintenance Margin after position settlement
-        _updateAccountMaintenanceMargin(pos.partyA);
-        _updateAccountMaintenanceMargin(pos.partyB);
-
-        // Burn position tokens using originalNotional (tokens were minted with original amount)
-        address ownerA = whitelist.getAccountOwner(pos.partyA);
-        address ownerB = whitelist.getAccountOwner(pos.partyB);
-
-        if (instrument.balanceOf(ownerA, pos.tokenIdA) > 0) {
-            instrument.burnPosition(ownerA, pos.tokenIdA, pos.originalNotional);
-        }
-        if (instrument.balanceOf(ownerB, pos.tokenIdB) > 0) {
-            instrument.burnPosition(ownerB, pos.tokenIdB, pos.originalNotional);
-        }
-
-        emit PositionMatured(tradeId, block.timestamp);
-    }
-
-    // ─── Admin Functions ────────────────────────────────────────────────
 
     /// @notice Set the protocol fee.
     /// @param newFeeBps New fee in basis points.
@@ -263,7 +122,38 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         feeRecipient = recipient;
     }
 
+    // ─── View Functions ─────────────────────────────────────────────────
+
+    /// @notice Get the EIP-712 digest for a matched trade.
+    /// @param trade The trade to hash.
+    /// @return The EIP-712 typed data hash.
+    function getTradeDigest(MatchedTrade calldata trade) external view returns (bytes32) {
+        return _hashTypedDataV4(_tradeStructHash(trade));
+    }
+
+    /// @notice Get all active position trade IDs for an account.
+    /// @param accountId The account to query.
+    /// @return Array of trade IDs.
+    function getAccountPositions(bytes32 accountId) external view returns (bytes32[] memory) {
+        return accountPositions[accountId];
+    }
+
+    /// @notice Get position details.
+    /// @param tradeId The trade ID to query.
+    /// @return The novated position struct.
+    function getPosition(bytes32 tradeId) external view returns (NovatedPosition memory) {
+        return positions[tradeId];
+    }
+
     // ─── ReceiverTemplate Implementation ─────────────────────────────────
+
+    /// @inheritdoc AccessControl
+    /// @dev Overrides supportsInterface to include both AccessControl and ReceiverTemplate interfaces.
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(AccessControl, ReceiverTemplate) returns (bool) {
+        return AccessControl.supportsInterface(interfaceId) || ReceiverTemplate.supportsInterface(interfaceId);
+    }
 
     /// @notice Process the report data from Chainlink CRE.
     /// @dev Called by ReceiverTemplate.onReport() after validation.
@@ -307,38 +197,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         }
     }
 
-    /// @inheritdoc AccessControl
-    /// @dev Overrides supportsInterface to include both AccessControl and ReceiverTemplate interfaces.
-    function supportsInterface(
-        bytes4 interfaceId
-    ) public view override(AccessControl, ReceiverTemplate) returns (bool) {
-        return AccessControl.supportsInterface(interfaceId) || ReceiverTemplate.supportsInterface(interfaceId);
-    }
-
-    // ─── View Functions ─────────────────────────────────────────────────
-
-    /// @notice Get the EIP-712 digest for a matched trade.
-    /// @param trade The trade to hash.
-    /// @return The EIP-712 typed data hash.
-    function getTradeDigest(MatchedTrade calldata trade) external view returns (bytes32) {
-        return _hashTypedDataV4(_tradeStructHash(trade));
-    }
-
-    /// @notice Get all active position trade IDs for an account.
-    /// @param accountId The account to query.
-    /// @return Array of trade IDs.
-    function getAccountPositions(bytes32 accountId) external view returns (bytes32[] memory) {
-        return accountPositions[accountId];
-    }
-
-    /// @notice Get position details.
-    /// @param tradeId The trade ID to query.
-    /// @return The novated position struct.
-    function getPosition(bytes32 tradeId) external view returns (NovatedPosition memory) {
-        return positions[tradeId];
-    }
-
-    // ─── Internal Functions ─────────────────────────────────────────────
+    // ─── Internal: Trade Execution ─────────────────────────────────────
 
     /// @dev Execute a matched trade: validate, verify signatures, check margins, and novate.
     function _executeMatchedTrade(
@@ -353,15 +212,36 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         _verifySignature(trade, trade.partyA, sigA);
         _verifySignature(trade, trade.partyB, sigB);
 
-        // ── Whitelist Check ──
+        // ── Whitelist & Tier Check ──
         address ownerA = whitelist.getAccountOwner(trade.partyA);
         address ownerB = whitelist.getAccountOwner(trade.partyB);
+        
+        // Check whitelisted status (includes KYC expiry check)
         if (!whitelist.isWhitelisted(ownerA)) revert PartyNotWhitelisted(trade.partyA);
         if (!whitelist.isWhitelisted(ownerB)) revert PartyNotWhitelisted(trade.partyB);
 
+        // Check KYC expiry explicitly for better error messaging
+        if (whitelist.isExpired(ownerA)) {
+            revert KycExpired(trade.partyA, whitelist.getValidUntil(ownerA));
+        }
+        if (whitelist.isExpired(ownerB)) {
+            revert KycExpired(trade.partyB, whitelist.getValidUntil(ownerB));
+        }
+
+        // Check maxNotional limits (cumulative across all positions)
+        if (!whitelist.checkNotionalLimit(ownerA, trade.notional)) {
+            uint256 currentTotal = whitelist.getTotalOpenNotional(ownerA);
+            uint256 maxAllowed = whitelist.getMaxNotional(ownerA);
+            revert ExceedsMaxNotional(trade.partyA, trade.notional, currentTotal, maxAllowed);
+        }
+        if (!whitelist.checkNotionalLimit(ownerB, trade.notional)) {
+            uint256 currentTotal = whitelist.getTotalOpenNotional(ownerB);
+            uint256 maxAllowed = whitelist.getMaxNotional(ownerB);
+            revert ExceedsMaxNotional(trade.partyB, trade.notional, currentTotal, maxAllowed);
+        }
+
         // ── Margin Check ──
         uint256 tenor = trade.maturityDate - trade.startDate;
-
         uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
 
         if (!riskEngine.checkIM(trade.partyA, imRequired)) {
@@ -384,52 +264,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
 
         // ── Novation ──
         _novate(trade, ownerA, ownerB, imRequired);
-    }
-
-
-    /// @dev Execute VM settlement for a batch of positions by trade.
-    /// @param settlements Array of VM settlement entries (tradeId + npvChange).
-    function _executeVMSettlement(
-        VMSettlement[] memory settlements
-    ) internal {
-        for (uint256 i; i < settlements.length; ++i) {
-            VMSettlement memory settlement = settlements[i];
-            _settleVariationMargin(settlement.tradeId, settlement.npvChange);
-        }
-    }
-
-    /// @dev Settle variation margin for a single position by tradeId.
-    /// @param tradeId The unique identifier of the position to settle.
-    /// @param npvChange The NPV change from the fixed payer's perspective.
-    function _settleVariationMargin(
-        bytes32 tradeId,
-        int256 npvChange
-    ) internal {
-        NovatedPosition storage pos = positions[tradeId];
-        if (!pos.active) revert PositionNotActive(tradeId);
-
-        pos.lastNpv += npvChange;
-
-        // Party A is the fixed payer: positive npvChange benefits A, debits B
-        // Settle VM in the position's collateral token
-        if (npvChange != 0) {
-            marginVault.settleVariationMargin(pos.partyA, pos.collateralToken, npvChange);
-            marginVault.settleVariationMargin(pos.partyB, pos.collateralToken, -npvChange);
-        }
-
-        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
-    }
-
-
-    /// @dev Execute matured position settlement for a batch of positions.
-    /// @param settlements Array of matured position settlement entries.
-    function _executeMaturedPositionSettlement(
-        MaturedPositionSettlement[] memory settlements
-    ) internal {
-        for (uint256 i; i < settlements.length; ++i) {
-            MaturedPositionSettlement memory settlement = settlements[i];
-            _settleSingleMaturedPosition(settlement.tradeId, settlement.finalNpvChange);
-        }
     }
 
     /// @dev Validate trade parameters.
@@ -497,6 +331,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         usedNonces[trade.partyA][trade.nonce] = true;
         usedNonces[trade.partyB][trade.nonce] = true;
 
+        // Add notional to participants' total open notional
+        whitelist.addNotional(ownerA, trade.notional);
+        whitelist.addNotional(ownerB, trade.notional);
+
         // Mint Party A's position (PAY_FIXED)
         IRSInstrument.SwapTerms memory termsA = IRSInstrument.SwapTerms({
             notional: trade.notional,
@@ -528,8 +366,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         marginVault.lockInitialMargin(trade.partyB, trade.collateralToken, imRequired);
 
         // Update Maintenance Margin for both parties
-        _updateAccountMaintenanceMargin(trade.partyA);
-        _updateAccountMaintenanceMargin(trade.partyB);
+        _updateAccountMaintenanceMargin(trade.partyA, trade.collateralToken);
+        _updateAccountMaintenanceMargin(trade.partyB, trade.collateralToken);
 
         // Store novated position
         positions[trade.tradeId] = NovatedPosition({
@@ -539,7 +377,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
             partyA: trade.partyA,
             partyB: trade.partyB,
             notional: trade.notional,
-            originalNotional: trade.notional,
             fixedRateBps: trade.fixedRateBps,
             startDate: trade.startDate,
             maturityDate: trade.maturityDate,
@@ -571,32 +408,246 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         );
     }
 
-    /// @dev Calculate aggregate initial margin for all active positions of an account.
-    /// @param accountId The account identifier.
-    /// @return totalIM The total IM requirement.
-    function _calculateAggregateIM(bytes32 accountId) internal view returns (uint256 totalIM) {
-        bytes32[] memory tradeIds = accountPositions[accountId];
-        for (uint256 i = 0; i < tradeIds.length; ++i) {
-            NovatedPosition storage pos = positions[tradeIds[i]];
-            if (pos.active) {
-                uint256 tenor = pos.maturityDate - pos.startDate;
-                totalIM += riskEngine.calculateIM(pos.notional, tenor);
-            }
+    // ─── Internal: Position Compression ────────────────────────────────
+
+    /// @dev Delete a single position (used during compression).
+    /// @param tradeId The trade ID of the position to delete.
+    function _deletePosition(bytes32 tradeId) internal {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+
+        // Release IM for both parties
+        uint256 tenor = pos.maturityDate - pos.startDate;
+        uint256 imRelease = riskEngine.calculateIM(pos.notional, tenor);
+
+        marginVault.releaseInitialMargin(pos.partyA, pos.collateralToken, imRelease);
+        marginVault.releaseInitialMargin(pos.partyB, pos.collateralToken, imRelease);
+
+        // Update Maintenance Margin for both parties
+        _updateAccountMaintenanceMargin(pos.partyA, pos.collateralToken);
+        _updateAccountMaintenanceMargin(pos.partyB, pos.collateralToken);
+
+        // Remove notional from participants' total open notional
+        address ownerA = whitelist.getAccountOwner(pos.partyA);
+        address ownerB = whitelist.getAccountOwner(pos.partyB);
+        whitelist.removeNotional(ownerA, pos.notional);
+        whitelist.removeNotional(ownerB, pos.notional);
+
+        // Burn position tokens
+        if (instrument.balanceOf(ownerA, pos.tokenIdA) > 0) {
+            instrument.burnPosition(ownerA, pos.tokenIdA, pos.notional);
+        }
+        if (instrument.balanceOf(ownerB, pos.tokenIdB) > 0) {
+            instrument.burnPosition(ownerB, pos.tokenIdB, pos.notional);
+        }
+
+        // Mark position as inactive
+        pos.active = false;
+        --activePositionCount;
+
+        emit PositionCompressed(
+            pos.partyA,
+            tradeId,
+            bytes32(0),
+            pos.notional
+        );
+    }
+
+    /// @dev Create a single compressed position (used during compression).
+    /// @param newPos The new compressed position data.
+    /// @param imRequired The initial margin required for this position.
+    function _createCompressedPosition(
+        NewCompressedPosition memory newPos,
+        uint256 imRequired
+    ) internal {
+        // Get owners for both parties
+        address ownerA = whitelist.getAccountOwner(newPos.partyA);
+        address ownerB = whitelist.getAccountOwner(newPos.partyB);
+
+        // Add notional to participants' total open notional (for new compressed position)
+        // Note: The old notional was already removed in _deletePosition
+        whitelist.addNotional(ownerA, newPos.notional);
+        whitelist.addNotional(ownerB, newPos.notional);
+
+        // Mint Party A's position (PAY_FIXED)
+        IRSInstrument.SwapTerms memory termsA = IRSInstrument.SwapTerms({
+            notional: newPos.notional,
+            fixedRateBps: newPos.fixedRateBps,
+            startDate: newPos.startDate,
+            maturityDate: newPos.maturityDate,
+            paymentInterval: newPos.paymentInterval,
+            direction: IRSInstrument.Direction.PAY_FIXED,
+            floatingRateIndex: newPos.floatingRateIndex,
+            dayCountConvention: newPos.dayCountConvention
+        });
+        uint256 tokenIdA = instrument.mintPosition(ownerA, termsA);
+
+        // Mint Party B's position (RECEIVE_FIXED)
+        IRSInstrument.SwapTerms memory termsB = IRSInstrument.SwapTerms({
+            notional: newPos.notional,
+            fixedRateBps: newPos.fixedRateBps,
+            startDate: newPos.startDate,
+            maturityDate: newPos.maturityDate,
+            paymentInterval: newPos.paymentInterval,
+            direction: IRSInstrument.Direction.RECEIVE_FIXED,
+            floatingRateIndex: newPos.floatingRateIndex,
+            dayCountConvention: newPos.dayCountConvention
+        });
+        uint256 tokenIdB = instrument.mintPosition(ownerB, termsB);
+
+        // Lock Initial Margin for both parties
+        marginVault.lockInitialMargin(newPos.partyA, newPos.collateralToken, imRequired);
+        marginVault.lockInitialMargin(newPos.partyB, newPos.collateralToken, imRequired);
+
+        // Update MM for both parties
+        _updateAccountMaintenanceMargin(newPos.partyA, newPos.collateralToken);
+        _updateAccountMaintenanceMargin(newPos.partyB, newPos.collateralToken);
+
+        // Store the new compressed position
+        positions[newPos.tradeId] = NovatedPosition({
+            tradeId: newPos.tradeId,
+            tokenIdA: tokenIdA,
+            tokenIdB: tokenIdB,
+            partyA: newPos.partyA,
+            partyB: newPos.partyB,
+            notional: newPos.notional,
+            fixedRateBps: newPos.fixedRateBps,
+            startDate: newPos.startDate,
+            maturityDate: newPos.maturityDate,
+            active: true,
+            lastNpv: 0,
+            collateralToken: newPos.collateralToken
+        });
+
+        // Track positions per account
+        accountPositions[newPos.partyA].push(newPos.tradeId);
+        accountPositions[newPos.partyB].push(newPos.tradeId);
+
+        ++activePositionCount;
+
+        emit TradeNovated(
+            newPos.tradeId,
+            tokenIdA,
+            tokenIdB,
+            newPos.partyA,
+            newPos.partyB,
+            newPos.notional,
+            newPos.fixedRateBps,
+            newPos.startDate,
+            newPos.maturityDate,
+            newPos.paymentInterval,
+            newPos.dayCountConvention,
+            newPos.floatingRateIndex,
+            newPos.collateralToken
+        );
+    }
+
+    // ─── Internal: Variation Margin ─────────────────────────────────────
+
+    /// @dev Execute VM settlement for a batch of positions by trade.
+    /// @param settlements Array of VM settlement entries (tradeId + npvChange).
+    function _executeVMSettlement(
+        VMSettlement[] memory settlements
+    ) internal {
+        for (uint256 i; i < settlements.length; ++i) {
+            VMSettlement memory settlement = settlements[i];
+            _settleVariationMargin(settlement.tradeId, settlement.npvChange);
         }
     }
 
-    /// @dev Calculate aggregate maintenance margin for all active positions of an account.
-    /// @param accountId The account identifier.
-    /// @return totalMM The total MM requirement.
-    function _calculateAggregateMM(bytes32 accountId) internal view returns (uint256 totalMM) {
-        uint256 totalIM = _calculateAggregateIM(accountId);
-        totalMM = riskEngine.calculateMM(totalIM);
+    /// @dev Settle variation margin for a single position by tradeId.
+    /// @param tradeId The unique identifier of the position to settle.
+    /// @param npvChange The NPV change from the fixed payer's perspective.
+    function _settleVariationMargin(
+        bytes32 tradeId,
+        int256 npvChange
+    ) internal {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+
+        pos.lastNpv += npvChange;
+
+        // Party A is the fixed payer: positive npvChange benefits A, debits B
+        // Settle VM in the position's collateral token
+        if (npvChange != 0) {
+            marginVault.settleVariationMargin(pos.partyA, pos.collateralToken, npvChange);
+            marginVault.settleVariationMargin(pos.partyB, pos.collateralToken, -npvChange);
+        }
+
+        emit VariationMarginSettled(tradeId, npvChange, block.timestamp);
     }
 
-    /// @dev Update the maintenance margin for an account based on all active positions.
+    // ─── Internal: Position Settlement ─────────────────────────────────
+
+    /// @dev Execute matured position settlement for a batch of positions.
+    /// @param settlements Array of matured position settlement entries.
+    function _executeMaturedPositionSettlement(
+        MaturedPositionSettlement[] memory settlements
+    ) internal {
+        for (uint256 i; i < settlements.length; ++i) {
+            MaturedPositionSettlement memory settlement = settlements[i];
+            _settleSingleMaturedPosition(settlement.tradeId, settlement.finalNpvChange);
+        }
+    }
+
+    /// @dev Settle a single matured position and release locked margin.
+    /// @param tradeId The trade that has matured.
+    /// @param finalNpvChange The final NPV change to settle (from fixed payer's perspective).
+    function _settleSingleMaturedPosition(
+        bytes32 tradeId,
+        int256 finalNpvChange
+    ) internal {
+        NovatedPosition storage pos = positions[tradeId];
+        if (!pos.active) revert PositionNotActive(tradeId);
+        // TODO: enable this in production
+        // if (block.timestamp < pos.maturityDate) revert PositionNotMatured(tradeId);
+
+        // Settle final variation margin before closing position
+        if (finalNpvChange != 0) {
+            _settleVariationMargin(tradeId, finalNpvChange);
+        }
+
+        pos.active = false;
+        --activePositionCount;
+
+        // Release IM for both parties
+        uint256 tenor = pos.maturityDate - pos.startDate;
+        uint256 imRelease = riskEngine.calculateIM(pos.notional, tenor);
+
+        marginVault.releaseInitialMargin(pos.partyA, pos.collateralToken, imRelease);
+        marginVault.releaseInitialMargin(pos.partyB, pos.collateralToken, imRelease);
+
+        // Update Maintenance Margin after position settlement
+        _updateAccountMaintenanceMargin(pos.partyA, pos.collateralToken);
+        _updateAccountMaintenanceMargin(pos.partyB, pos.collateralToken);
+
+        // Remove notional from participants' total open notional
+        address ownerA = whitelist.getAccountOwner(pos.partyA);
+        address ownerB = whitelist.getAccountOwner(pos.partyB);
+        whitelist.removeNotional(ownerA, pos.notional);
+        whitelist.removeNotional(ownerB, pos.notional);
+
+        // Burn position tokens using notional (tokens were minted with current amount)
+        if (instrument.balanceOf(ownerA, pos.tokenIdA) > 0) {
+            instrument.burnPosition(ownerA, pos.tokenIdA, pos.notional);
+        }
+        if (instrument.balanceOf(ownerB, pos.tokenIdB) > 0) {
+            instrument.burnPosition(ownerB, pos.tokenIdB, pos.notional);
+        }
+
+        emit PositionMatured(tradeId, block.timestamp);
+    }
+
+    // ─── Internal: Margin Calculations ─────────────────────────────────
+
+    /// @dev Update the maintenance margin for an account for a specific collateral token.
+    /// @dev Reads locked IM directly from MarginVault to get the current IM requirement.
     /// @param accountId The account identifier.
-    function _updateAccountMaintenanceMargin(bytes32 accountId) internal {
-        uint256 newMM = _calculateAggregateMM(accountId);
-        riskEngine.updateMaintenanceMargin(accountId, newMM);
+    /// @param collateralToken The collateral token to update MM for.
+    function _updateAccountMaintenanceMargin(bytes32 accountId, address collateralToken) internal {
+        // Get locked IM directly from MarginVault (simpler than iterating positions)
+        uint256 lockedIM = marginVault.getLockedIMByToken(accountId, collateralToken);
+        uint256 newMM = riskEngine.calculateMM(lockedIM);
+        riskEngine.updateMaintenanceMargin(accountId, collateralToken, newMM);
     }
 }

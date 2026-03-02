@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
@@ -35,9 +35,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
 
     /// @notice Per-account per-token collateral breakdown.
     mapping(bytes32 => mapping(address => uint256)) public tokenCollateral;
-
-    /// @notice Signed variation margin balance per token (positive = credit, negative = debit).
-    mapping(bytes32 => mapping(address => int256)) public vmBalanceSigned;
 
     /// @notice Per-account per-token locked initial margin.
     mapping(bytes32 => mapping(address => uint256)) public lockedIMByToken;
@@ -232,9 +229,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         MarginAccount storage account = marginAccounts[accountId];
         if (!account.exists) revert AccountNotInitialized(accountId);
 
-        // Update token-specific VM balance
-        vmBalanceSigned[accountId][token] += amount;
-
         // Update totalCollateral based on net VM
         if (amount > 0) {
             account.totalCollateral += uint256(amount);
@@ -247,7 +241,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
             } else {
                 account.totalCollateral = 0;
             }
-            // Also reduce token-specific collateral
+            // Reduce token-specific collateral
             if (tokenCollateral[accountId][token] >= debit) {
                 tokenCollateral[accountId][token] -= debit;
             } else {
@@ -285,6 +279,15 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         }
     }
 
+    /// @notice Get the free (withdrawable) margin for an account for a specific token.
+    /// @dev Free margin = tokenCollateral - lockedIM in that token.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token.
+    /// @return free The amount of free margin available for the specific token.
+    function getFreeMargin(bytes32 accountId, address token) public view returns (uint256 free) {
+        return getFreeMarginByToken(accountId, token);
+    }
+
     /// @notice Get the free (withdrawable) margin for an account in a specific token.
     /// @dev Free margin in token = tokenCollateral - lockedIM in that token.
     /// @param accountId The account identifier.
@@ -300,8 +303,16 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         }
     }
 
-    /// @notice Get the total collateral for an account.
-    /// @param accountId The  account identifier.
+    /// @notice Get the total collateral for an account for a specific token.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token.
+    /// @return The total collateral amount for the specific token.
+    function getTotalCollateral(bytes32 accountId, address token) external view returns (uint256) {
+        return tokenCollateral[accountId][token];
+    }
+
+    /// @notice Get the total collateral for an account (all tokens combined).
+    /// @param accountId The account identifier.
     /// @return The total collateral amount.
     function getTotalCollateral(bytes32 accountId) external view returns (uint256) {
         return marginAccounts[accountId].totalCollateral;
@@ -319,5 +330,13 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     /// @return True if the account has been initialized.
     function accountExists(bytes32 accountId) external view returns (bool) {
         return marginAccounts[accountId].exists;
+    }
+
+    /// @notice Get the locked initial margin for an account for a specific token.
+    /// @param accountId The account identifier.
+    /// @param token The collateral token.
+    /// @return The locked IM amount for the specific token.
+    function getLockedIMByToken(bytes32 accountId, address token) external view returns (uint256) {
+        return lockedIMByToken[accountId][token];
     }
 }

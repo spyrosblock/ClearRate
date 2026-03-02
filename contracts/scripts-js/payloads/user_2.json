@@ -1,0 +1,10 @@
+{
+  "address": "0xf68D9e0fAa751AD61e0ED70852798bF9D9C04bF7",
+  "accountId": "0x0000000000000000000000000000000000000000000000000000000000000002",
+  "company": {
+    "companyName": "Jane Johnson",
+    "registrationNumber": "JJ123456789",
+    "registeredCountry": "CA",
+    "contactEmail": "jane.johnson@example.com"
+  }
+}

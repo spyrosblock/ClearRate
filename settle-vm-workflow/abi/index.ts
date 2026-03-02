@@ -1,1 +1,0 @@
-export { ClearingHouseABI } from './ClearingHouse'

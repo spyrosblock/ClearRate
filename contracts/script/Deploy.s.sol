@@ -66,7 +66,7 @@ contract Deploy is ClearRateScript {
 
         // 1. Deploy Whitelist
         console.log("\n[1/7] Deploying Whitelist...");
-        Whitelist whitelist = new Whitelist(deployer);
+        Whitelist whitelist = new Whitelist(deployer, getChainlinkForwarder());
         logDeployment("Whitelist", address(whitelist));
 
         // 2. Deploy MarginVault
@@ -154,6 +154,8 @@ contract Deploy is ClearRateScript {
         // Grant roles to Whitelist
         whitelist.grantRole(WHITELIST_ADMIN_ROLE, deployer);
         console.log("- Granted WHITELIST_ADMIN_ROLE to deployer on Whitelist");
+        whitelist.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on Whitelist");
 
         // Set default risk weights
         _setDefaultRiskWeights(riskEngine);

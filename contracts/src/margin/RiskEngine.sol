@@ -1,16 +1,13 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {MarginVault} from "./MarginVault.sol";
-import {PositionMath} from "../core/PositionMath.sol";
 
 /// @title RiskEngine
 /// @notice Validates initial margin, maintenance margin, and liquidation eligibility.
 /// @dev Risk weights are tenor-dependent. Confidence multiplier is configurable.
 contract RiskEngine is AccessControl {
-    using PositionMath for uint256;
-
     // ─── Constants ──────────────────────────────────────────────────────
     uint256 internal constant BPS = 10_000;
 
@@ -32,11 +29,11 @@ contract RiskEngine is AccessControl {
     /// @notice Maintenance margin as a fraction of IM in BPS (e.g. 7500 = 75% of IM).
     uint256 public maintenanceMarginRatioBps;
 
-    /// @notice Per-account initial margin requirement (set by offchain compute or admin).
-    mapping(bytes32 => uint256) public accountInitialMargin;
+    /// @notice Per-account initial margin requirement per collateral token (set by offchain compute or admin).
+    mapping(bytes32 => mapping(address => uint256)) public accountInitialMargin;
 
-    /// @notice Per-account maintenance margin requirement (set by offchain compute or admin).
-    mapping(bytes32 => uint256) public accountMaintenanceMargin;
+    /// @notice Per-account maintenance margin requirement per collateral token (set by offchain compute or admin).
+    mapping(bytes32 => mapping(address => uint256)) public accountMaintenanceMargin;
 
     // ─── Events ─────────────────────────────────────────────────────────
     event RiskWeightUpdated(uint256 indexed tenor, uint256 oldWeight, uint256 newWeight);
@@ -121,7 +118,7 @@ contract RiskEngine is AccessControl {
     ) public view returns (uint256 im) {
         uint256 weight = riskWeightBps[tenor];
         if (weight == 0) revert NoRiskWeightForTenor(tenor);
-        im = PositionMath.initialMargin(notional, weight, confidenceBps);
+        im = (notional * weight * confidenceBps) / (BPS * BPS);
     }
 
     /// @notice Calculate the maintenance margin for a given IM amount.
@@ -145,47 +142,53 @@ contract RiskEngine is AccessControl {
         return freeMargin >= additionalIM;
     }
 
-    /// @notice Check if an account meets its maintenance margin requirement.
-    /// @param accountId The  account identifier.
+    /// @notice Check if an account meets its maintenance margin requirement for a specific collateral token.
+    /// @param accountId The account identifier.
+    /// @param collateralToken The collateral token to check against.
     /// @return True if the account passes the MM check.
-    function checkMM(bytes32 accountId) external view returns (bool) {
-        uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
-        uint256 mm = accountMaintenanceMargin[accountId];
+    function checkMM(bytes32 accountId, address collateralToken) external view returns (bool) {
+        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
+        uint256 mm = accountMaintenanceMargin[accountId][collateralToken];
         return totalCollateral >= mm;
     }
 
-    /// @notice Check if an account is eligible for liquidation.
-    /// @param accountId The  account identifier.
+    /// @notice Check if an account is eligible for liquidation for a specific collateral token.
+    /// @param accountId The account identifier.
+    /// @param collateralToken The collateral token to check against.
     /// @return True if the account's collateral is below maintenance margin.
-    function isLiquidatable(bytes32 accountId) external view returns (bool) {
-        uint256 totalCollateral = marginVault.getTotalCollateral(accountId);
-        uint256 mm = accountMaintenanceMargin[accountId];
+    function isLiquidatable(bytes32 accountId, address collateralToken) external view returns (bool) {
+        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
+        uint256 mm = accountMaintenanceMargin[accountId][collateralToken];
         return totalCollateral < mm;
     }
 
     // ─── Account Margin Updates ─────────────────────────────────────────
 
-    /// @notice Update the aggregate IM for an account (called after trade/compression).
-    /// @param accountId The  account identifier.
+    /// @notice Update the aggregate IM for an account for a specific collateral token (called after trade/compression).
+    /// @param accountId The account identifier.
+    /// @param collateralToken The collateral token.
     /// @param newIM The new total IM requirement.
     function updateAccountIM(
         bytes32 accountId,
+        address collateralToken,
         uint256 newIM
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
-        uint256 oldIM = accountInitialMargin[accountId];
-        accountInitialMargin[accountId] = newIM;
+        uint256 oldIM = accountInitialMargin[accountId][collateralToken];
+        accountInitialMargin[accountId][collateralToken] = newIM;
         emit AccountIMUpdated(accountId, oldIM, newIM);
     }
 
-    /// @notice Update the maintenance margin for an account.
-    /// @param accountId The  account identifier.
+    /// @notice Update the maintenance margin for an account for a specific collateral token.
+    /// @param accountId The account identifier.
+    /// @param collateralToken The collateral token.
     /// @param newMM The new maintenance margin requirement.
     function updateMaintenanceMargin(
         bytes32 accountId,
+        address collateralToken,
         uint256 newMM
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
-        uint256 oldMM = accountMaintenanceMargin[accountId];
-        accountMaintenanceMargin[accountId] = newMM;
+        uint256 oldMM = accountMaintenanceMargin[accountId][collateralToken];
+        accountMaintenanceMargin[accountId][collateralToken] = newMM;
         emit AccountMMUpdated(accountId, oldMM, newMM);
     }
 }

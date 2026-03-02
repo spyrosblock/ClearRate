@@ -5,9 +5,9 @@ import {Script, console} from "forge-std/Script.sol";
 import {MarginVault} from "../src/margin/MarginVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @title DepositMargin
+/// @title MintAndDepositMargin
 /// @notice Script to deposit 4 million tokens each for 2 users on the MarginVault.
-/// @dev Run with: forge script script/DepositMargin.s.sol:DepositMargin --rpc-url sepolia --broadcast --verify
+/// @dev Run with: forge script script/MintAndDepositMargin.s.sol:MintAndDepositMargin --rpc-url sepolia --broadcast --verify
 ///
 /// This script reads from environment variables:
 /// - USER1_ADDRESS / USER2_ADDRESS: User wallet addresses
@@ -15,7 +15,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// - USER1_PRIVATE_KEY / USER2_PRIVATE_KEY: Private keys for signing transactions
 /// - MARGIN_VAULT_ADDRESS: Address of the MarginVault contract
 /// - MOCK_COLLATERAL_TOKEN: Address of the collateral token (USDC)
-contract DepositMargin is Script {
+contract MintAndDepositMargin is Script {
     // ═══════════════════════════════════════════════════════════════════════
     //  CONSTANTS
     // ═══════════════════════════════════════════════════════════════════════
@@ -83,6 +83,36 @@ contract DepositMargin is Script {
         // Initialize MarginVault interface
         MarginVault marginVault = MarginVault(marginVaultAddress);
         IERC20 token = IERC20(collateralToken);
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  MINT TOKENS TO USERS (using the deployer key for mock token)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        console.log("\n--- Minting Tokens to Users ---");
+        
+        // Get the deployer private key from environment
+        string memory deployerKeyStr = vm.envString("DEPLOYER_PRIVATE_KEY");
+        uint256 deployerPrivateKey = _parseHexPrivateKey(deployerKeyStr);
+
+        // Cast to contract with mint function
+        // Using inline assembly to call mint(address, uint256)
+        address tokenAddr = collateralToken;
+        
+        vm.startBroadcast(deployerPrivateKey);
+        
+        // Mint to user 1
+        (bool success1, ) = tokenAddr.call(abi.encodeWithSignature("mint(address,uint256)", user1Address, DEPOSIT_AMOUNT));
+        require(success1, "Failed to mint tokens to user 1");
+        console.log("Minted to User 1:");
+        console.logUint(DEPOSIT_AMOUNT);
+        
+        // Mint to user 2
+        (bool success2, ) = tokenAddr.call(abi.encodeWithSignature("mint(address,uint256)", user2Address, DEPOSIT_AMOUNT));
+        require(success2, "Failed to mint tokens to user 2");
+        console.log("Minted to User 2:");
+        console.logUint(DEPOSIT_AMOUNT);
+        
+        vm.stopBroadcast();
 
         // ═══════════════════════════════════════════════════════════════════════
         //  CHECK TOKEN BALANCES

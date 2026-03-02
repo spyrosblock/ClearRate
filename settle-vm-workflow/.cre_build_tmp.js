@@ -15857,7 +15857,6 @@ var novatedPositionsResponseSchema = exports_external.array(exports_external.obj
   party_a: exports_external.string(),
   party_b: exports_external.string(),
   notional: exports_external.string(),
-  original_notional: exports_external.string(),
   fixed_rate_bps: exports_external.number(),
   start_date: exports_external.string(),
   maturity_date: exports_external.string(),
@@ -15891,7 +15890,6 @@ var fetchPositionsFromAPI = (runtime2, sendRequester, config) => {
     partyA: pos.party_a,
     partyB: pos.party_b,
     notional: pos.notional,
-    originalNotional: pos.original_notional,
     fixedRateBps: pos.fixed_rate_bps.toString(),
     startDate: pos.start_date,
     maturityDate: pos.maturity_date,
@@ -15940,7 +15938,6 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`);
   }
   const evmClient = new ClientCapability(network248.chainSelector.selector);
-  payload.settlements.forEach((s) => s.isFinal = true);
   const vmSettlements = payload.settlements.filter((s) => !s.isFinal);
   const maturedSettlements = payload.settlements.filter((s) => s.isFinal);
   runtime2.log(`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`);

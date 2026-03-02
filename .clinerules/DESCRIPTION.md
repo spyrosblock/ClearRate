@@ -163,11 +163,11 @@ cre workflow simulate . --target staging-settings --broadcast
 │   │       ├── IReceiver.sol
 │   │       └── ReceiverTemplate.sol
 │   │
-│   ├── script/                      # Foundry deployment scripts
-│   │   ├── Deploy.s.sol             # Deploys all contracts
-│   │   ├── DepositMargin.s.sol      # Deposit margin script
-│   │   ├── WhitelistUsers.s.sol     # Whitelist users script
-│   │   └── ClearRateScript.sol      # Base script contract
+│   ├── script/                        # Foundry deployment scripts
+│   │   ├── Deploy.s.sol               # Deploys all contracts
+│   │   ├── MintAndDepositMargin.s.sol # Mint and deposit margin script
+│   │   ├── WhitelistUsers.s.sol       # Whitelist users script
+│   │   └── ClearRateScript.sol        # Base script contract
 │   │
 │   ├── test/                        # Test suite
 │   │   ├── Unit/                     # Unit tests

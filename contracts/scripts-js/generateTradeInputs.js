@@ -100,7 +100,13 @@ async function main() {
   const fixedRateBps = 350; // 3.50% annual fixed rate
 
   // Timestamps (using realistic dates)
-  const startDate = Math.floor(Date.now() / 1000) + 86400; // Tomorrow
+  // Start date should be 08:00 of tomorrow
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0); // 09:00:00.000
+  const startDate = Math.floor(tomorrow.getTime() / 1000);
+  
   const maturityDate = startDate + 365 * 24 * 60 * 60; // 1 year
 
   // Payment every 3 months (90 days in seconds)
@@ -189,8 +195,15 @@ async function main() {
     }
   };
 
+  // Create output directory if it doesn't exist
+  const outputDir = path.join(__dirname, "payloads");
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+    console.log(`Created directory: ${outputDir}`);
+  }
+  
   // Store the result in a trade.json file
-  const outputPath = path.join(__dirname, "trade.json");
+  const outputPath = path.join(outputDir, "trade.json");
   fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
   console.log(`Trade inputs saved to ${outputPath}`);
   console.log(JSON.stringify(output, null, 2));
