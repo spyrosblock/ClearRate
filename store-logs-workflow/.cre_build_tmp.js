@@ -16515,16 +16515,24 @@ function decodeTopic({ param, value: value2 }) {
 var configSchema = exports_external.object({
   evms: exports_external.array(exports_external.object({
     clearingHouseAddress: exports_external.string(),
+    marginVaultAddress: exports_external.string(),
+    riskEngineAddress: exports_external.string(),
     chainSelectorName: exports_external.string(),
     gasLimit: exports_external.string()
   })),
   dbApi: exports_external.object({
     url: exports_external.string()
+  }),
+  liquidationMonitoringApi: exports_external.object({
+    url: exports_external.string()
   })
 });
 var eventAbi = parseAbi([
   "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
-  "event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)"
+  "event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)",
+  "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
+  "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
+  "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)"
 ]);
 var postToDatabase = (sendRequester, config, payload) => {
   const dataToSend = { ...payload };
@@ -16541,6 +16549,41 @@ var postToDatabase = (sendRequester, config, payload) => {
   const resp = sendRequester.sendRequest(req).result();
   if (!ok(resp)) {
     throw new Error(`HTTP request failed with status: ${resp.statusCode}`);
+  }
+  return { statusCode: resp.statusCode };
+};
+var getFromApi = (sendRequester, url) => {
+  const req = {
+    url,
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  };
+  const resp = sendRequester.sendRequest(req).result();
+  if (!ok(resp)) {
+    if (resp.statusCode === 404) {
+      return { statusCode: 404, body: "" };
+    }
+    throw new Error(`HTTP GET request failed with status: ${resp.statusCode}`);
+  }
+  const bodyString = typeof resp.body === "string" ? resp.body : new TextDecoder().decode(resp.body);
+  return { statusCode: resp.statusCode, body: bodyString };
+};
+var postToApi = (sendRequester, url, payload) => {
+  const bodyBytes = new TextEncoder().encode(JSON.stringify(payload));
+  const body = Buffer.from(bodyBytes).toString("base64");
+  const req = {
+    url,
+    method: "POST",
+    body,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  };
+  const resp = sendRequester.sendRequest(req).result();
+  if (!ok(resp)) {
+    throw new Error(`HTTP POST request failed with status: ${resp.statusCode}`);
   }
   return { statusCode: resp.statusCode };
 };
@@ -16591,6 +16634,63 @@ var onLogTrigger = (runtime2, log) => {
     runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
     const result = httpClient.sendRequest(runtime2, (sendRequester, config) => postToDatabase(sendRequester, config, payload), consensusIdenticalAggregation())(runtime2.config).result();
     runtime2.log(`Successfully updated position to inactive. Status: ${result.statusCode}`);
+  } else if (eventName === "MarginDeposited" || eventName === "MarginWithdrawn") {
+    const args = decodedLog.args;
+    const { accountId, token, amount } = args;
+    runtime2.log(`Event ${eventName} detected: accountId ${accountId} | token ${token} | amount ${amount}`);
+    const getUrl = `${runtime2.config.liquidationMonitoringApi.url}?accountId=${accountId}&collateralToken=${token}`;
+    const existingRecordResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => getFromApi(sendRequester, getUrl), consensusIdenticalAggregation())(runtime2.config).result();
+    if (existingRecordResult.statusCode === 404) {
+      if (eventName === "MarginDeposited") {
+        runtime2.log(`Creating new liquidation monitoring record for accountId ${accountId}`);
+        const createUrl = `${runtime2.config.liquidationMonitoringApi.url}/create-record`;
+        const createResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, createUrl, {
+          accountId,
+          totalCollateral: amount.toString(),
+          maintenanceMargin: "0",
+          collateralToken: token
+        }), consensusIdenticalAggregation())(runtime2.config).result();
+        runtime2.log(`Successfully created liquidation monitoring record. Status: ${createResult.statusCode}`);
+      } else {
+        runtime2.log(`Warning: MarginWithdrawn event for non-existent account ${accountId} - skipping`);
+      }
+    } else {
+      const recordResponse = JSON.parse(existingRecordResult.body);
+      if (recordResponse.success && recordResponse.record) {
+        const currentCollateral = BigInt(recordResponse.record.totalCollateral);
+        let newCollateral;
+        if (eventName === "MarginDeposited") {
+          newCollateral = currentCollateral + amount;
+        } else {
+          if (amount > currentCollateral) {
+            newCollateral = BigInt(0);
+          } else {
+            newCollateral = currentCollateral - amount;
+          }
+        }
+        runtime2.log(`Updating existing record: currentCollateral ${currentCollateral} -> newCollateral ${newCollateral}`);
+        const updateUrl = `${runtime2.config.liquidationMonitoringApi.url}/update-total-collateral`;
+        const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, updateUrl, {
+          accountId,
+          totalCollateral: newCollateral.toString(),
+          collateralToken: token
+        }), consensusIdenticalAggregation())(runtime2.config).result();
+        runtime2.log(`Successfully updated total collateral. Status: ${updateResult.statusCode}`);
+      } else {
+        runtime2.log(`Warning: Failed to get record for account ${accountId} - response: ${existingRecordResult.body}`);
+      }
+    }
+  } else if (eventName === "AccountMMUpdated") {
+    const args = decodedLog.args;
+    const { accountId, collateralToken, oldMM, newMM } = args;
+    runtime2.log(`Event AccountMMUpdated detected: accountId ${accountId} | collateralToken ${collateralToken} | oldMM ${oldMM} | newMM ${newMM}`);
+    const updateUrl = `${runtime2.config.liquidationMonitoringApi.url}/update-maintenance-margin`;
+    const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, updateUrl, {
+      accountId,
+      maintenanceMargin: newMM.toString(),
+      collateralToken
+    }), consensusIdenticalAggregation())(runtime2.config).result();
+    runtime2.log(`Successfully updated maintenance margin. Status: ${updateResult.statusCode}`);
   } else {
     runtime2.log(`Unknown event: ${eventName}`);
     return "Unknown event";
@@ -16609,7 +16709,11 @@ var initWorkflow = (config) => {
   const evmClient = new cre.capabilities.EVMClient(network248.chainSelector.selector);
   return [
     cre.handler(evmClient.logTrigger({
-      addresses: [hexToBase64(config.evms[0].clearingHouseAddress)]
+      addresses: [
+        hexToBase64(config.evms[0].clearingHouseAddress),
+        hexToBase64(config.evms[0].marginVaultAddress),
+        hexToBase64(config.evms[0].riskEngineAddress)
+      ]
     }), onLogTrigger)
   ];
 };

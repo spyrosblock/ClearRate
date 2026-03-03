@@ -15831,6 +15831,9 @@ var configSchema = exports_external.object({
   }).optional(),
   novatedPositions: exports_external.object({
     apiEndpoint: exports_external.string()
+  }).optional(),
+  updateTotalCollateral: exports_external.object({
+    apiEndpoint: exports_external.string()
   }).optional()
 });
 var vmSettlementPayloadSchema = exports_external.object({
@@ -15849,6 +15852,26 @@ var toBytes32 = (hexStr) => {
   const paddedHex = cleanHex.padStart(64, "0");
   return `0x${paddedHex}`;
 };
+var toBigIntSafe = (value2) => {
+  const trimmed = value2.trim();
+  if (!trimmed.toLowerCase().includes("e")) {
+    return BigInt(trimmed);
+  }
+  const isNegative = trimmed.startsWith("-");
+  const absStr = isNegative ? trimmed.slice(1) : trimmed;
+  const [base, expStr] = absStr.toLowerCase().split("e");
+  const exponent = parseInt(expStr, 10);
+  const [intPart, decPart = ""] = base.split(".");
+  const decimalPlaces = decPart.length;
+  const digits = intPart + decPart;
+  const shift = exponent - decimalPlaces;
+  if (shift < 0) {
+    throw new Error(`Cannot convert ${value2} to BigInt: result would be fractional`);
+  }
+  const resultStr = digits + "0".repeat(shift);
+  const result = BigInt(resultStr);
+  return isNegative ? -result : result;
+};
 var novatedPositionsResponseSchema = exports_external.array(exports_external.object({
   id: exports_external.number(),
   trade_id: exports_external.string(),
@@ -15862,6 +15885,7 @@ var novatedPositionsResponseSchema = exports_external.array(exports_external.obj
   maturity_date: exports_external.string(),
   active: exports_external.boolean(),
   last_npv: exports_external.string(),
+  collateral_token: exports_external.string(),
   created_at: exports_external.string().optional(),
   updated_at: exports_external.string().optional()
 }));
@@ -15894,7 +15918,8 @@ var fetchPositionsFromAPI = (runtime2, sendRequester, config) => {
     startDate: pos.start_date,
     maturityDate: pos.maturity_date,
     active: pos.active,
-    lastNpv: pos.last_npv
+    lastNpv: pos.last_npv,
+    collateralToken: pos.collateral_token
   }));
   runtime2.log(`Found ${positions.length} active positions from novated_positions API`);
   return {
@@ -15928,6 +15953,72 @@ var fetchVMSettlementDataWithPositions = (sendRequester, config, positions) => {
   const data = JSON.parse(responseText);
   return vmSettlementPayloadSchema.parse(data);
 };
+var updateTotalCollateral = (runtime2, sendRequester, config, positions, settlements) => {
+  if (!config.updateTotalCollateral?.apiEndpoint) {
+    runtime2.log("Update Total Collateral API endpoint not configured, skipping collateral update");
+    return;
+  }
+  const positionMap = new Map;
+  for (const pos of positions) {
+    positionMap.set(pos.tradeId, pos);
+  }
+  const collateralChanges = new Map;
+  for (const settlement of settlements) {
+    const position = positionMap.get(settlement.tradeId);
+    if (!position) {
+      runtime2.log(`Warning: Position not found for tradeId ${settlement.tradeId}`);
+      continue;
+    }
+    const npvChange = toBigIntSafe(settlement.npvChange);
+    const partyAKey = `${position.partyA}:${position.collateralToken}`;
+    const existingPartyA = collateralChanges.get(partyAKey);
+    if (existingPartyA) {
+      existingPartyA.npvChange += npvChange;
+    } else {
+      collateralChanges.set(partyAKey, {
+        accountId: position.partyA,
+        collateralToken: position.collateralToken,
+        npvChange
+      });
+    }
+    const partyBKey = `${position.partyB}:${position.collateralToken}`;
+    const existingPartyB = collateralChanges.get(partyBKey);
+    if (existingPartyB) {
+      existingPartyB.npvChange -= npvChange;
+    } else {
+      collateralChanges.set(partyBKey, {
+        accountId: position.partyB,
+        collateralToken: position.collateralToken,
+        npvChange: -npvChange
+      });
+    }
+  }
+  runtime2.log(`Updating collateral for ${collateralChanges.size} account/token combinations`);
+  for (const [key, update] of collateralChanges) {
+    runtime2.log(`  Account: ${update.accountId}`);
+    runtime2.log(`  Token: ${update.collateralToken}`);
+    runtime2.log(`  NPV Change: ${update.npvChange.toString()}`);
+    const requestBody = JSON.stringify({
+      accountId: update.accountId,
+      collateralToken: update.collateralToken,
+      npvChange: update.npvChange.toString()
+    });
+    const response = sendRequester.sendRequest({
+      method: "POST",
+      url: config.updateTotalCollateral.apiEndpoint,
+      body: Buffer.from(requestBody).toString("base64"),
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }).result();
+    if (response.statusCode !== 200) {
+      const responseText = Buffer.from(response.body).toString("utf-8");
+      runtime2.log(`Warning: Failed to update collateral for ${update.accountId}: ${responseText}`);
+    } else {
+      runtime2.log(`  Successfully updated collateral for ${update.accountId}`);
+    }
+  }
+};
 var writeVMSettlement = (runtime2, evmConfig, payload) => {
   const network248 = getNetwork({
     chainFamily: "evm",
@@ -15953,7 +16044,7 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     const vmSettlementParams = parseAbiParameters("uint8,(bytes32 tradeId, int256 npvChange)[]");
     const settlements = vmSettlements.map((s) => ({
       tradeId: toBytes32(s.tradeId),
-      npvChange: BigInt(s.npvChange)
+      npvChange: toBigIntSafe(s.npvChange)
     }));
     const reportData = encodeAbiParameters(vmSettlementParams, [
       1,
@@ -15987,7 +16078,7 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     const maturedSettlementParams = parseAbiParameters("uint8, (bytes32 tradeId, int256 npvChange)[]");
     const settlements = maturedSettlements.map((s) => ({
       tradeId: toBytes32(s.tradeId),
-      npvChange: BigInt(s.npvChange)
+      npvChange: toBigIntSafe(s.npvChange)
     }));
     const reportData = encodeAbiParameters(maturedSettlementParams, [
       2,
@@ -16046,6 +16137,13 @@ var executeVMSettlementWorkflow = (runtime2) => {
   }
   runtime2.log("Writing VM settlement to ClearingHouse...");
   const txHash = writeVMSettlement(runtime2, evmConfig, vmSettlementData);
+  runtime2.log("Updating total collateral for settled accounts...");
+  httpCapability.sendRequest(runtime2, (sendRequester, config) => {
+    updateTotalCollateral(runtime2, sendRequester, config, positions, vmSettlementData.settlements);
+    return { success: true };
+  }, ConsensusAggregationByFields({
+    success: median
+  }))(runtime2.config).result();
   runtime2.log("=== VM Settlement Workflow Completed ===");
   runtime2.log(`Trades settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`);
   return txHash;

@@ -80,7 +80,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard {
 
     // ─── Constructor ────────────────────────────────────────────────────
 
-    /// @notice Deploy the LiquidationEngine.
     /// @param admin The admin address.
     /// @param riskEngine_ The RiskEngine contract address.
     /// @param marginVault_ The MarginVault contract address.

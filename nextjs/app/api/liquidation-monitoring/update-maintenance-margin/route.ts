@@ -11,6 +11,7 @@ import { sql } from '@/lib/db';
  * {
  *   accountId: string,        // bytes32 account ID (required)
  *   maintenanceMargin: string // New maintenance margin requirement as string (uint256)
+ *   collateralToken: string   // Collateral token address (optional, for multi-token accounts)
  * }
  * 
  * Response:
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    const { accountId, maintenanceMargin } = body;
+    const { accountId, maintenanceMargin, collateralToken } = body;
     
     // Validate required fields
     if (!accountId) {
@@ -55,10 +56,26 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Check if record exists for this account
-    const existingRecord = await sql`
-      SELECT id FROM liquidation_monitoring WHERE account_id = ${accountId}
-    `;
+    // Validate collateralToken format if provided (Ethereum address)
+    if (collateralToken && !/^0x[a-fA-F0-9]{40}$/.test(collateralToken)) {
+      return NextResponse.json(
+        { success: false, message: 'Invalid collateral token format - must be Ethereum address' },
+        { status: 400 }
+      );
+    }
+    
+    // Check if record exists for this account (with optional collateralToken filter)
+    let existingRecord;
+    if (collateralToken) {
+      existingRecord = await sql`
+        SELECT id FROM liquidation_monitoring 
+        WHERE account_id = ${accountId} AND collateral_token = ${collateralToken}
+      `;
+    } else {
+      existingRecord = await sql`
+        SELECT id FROM liquidation_monitoring WHERE account_id = ${accountId}
+      `;
+    }
     
     if (existingRecord.length === 0) {
       return NextResponse.json(
@@ -67,15 +84,24 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Update maintenance margin
-    await sql`
-      UPDATE liquidation_monitoring
-      SET maintenance_margin = ${maintenanceMargin}, updated_at = NOW()
-      WHERE account_id = ${accountId}
-    `;
+    // Update maintenance margin (with optional collateralToken filter)
+    if (collateralToken) {
+      await sql`
+        UPDATE liquidation_monitoring
+        SET maintenance_margin = ${maintenanceMargin}, updated_at = NOW()
+        WHERE account_id = ${accountId} AND collateral_token = ${collateralToken}
+      `;
+    } else {
+      await sql`
+        UPDATE liquidation_monitoring
+        SET maintenance_margin = ${maintenanceMargin}, updated_at = NOW()
+        WHERE account_id = ${accountId}
+      `;
+    }
     
     console.log('[Liquidation Monitoring] Maintenance margin updated successfully:');
     console.log('  Account ID:', accountId);
+    console.log('  Collateral Token:', collateralToken || 'all');
     console.log('  New Maintenance Margin:', maintenanceMargin);
     
     return NextResponse.json({

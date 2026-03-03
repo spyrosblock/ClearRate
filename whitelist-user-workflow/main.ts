@@ -28,7 +28,7 @@ const configSchema = z.object({
 	kybApi: z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
-	riskManagementApi: z.object({
+	riskAssessmentApi: z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
 	usersApi: z.object({
@@ -200,7 +200,7 @@ const fetchMaxNotional = (
 	accountId: string,
 ): ValidatedRiskManagementResponse => {
 	// If no API endpoint configured, use default maxNotional
-	if (!config.riskManagementApi?.apiEndpoint) {
+	if (!config.riskAssessmentApi?.apiEndpoint) {
 		return {
 			maxNotional: '10000000000000000000000000', // 10M * 1e18 default
 		}
@@ -216,7 +216,7 @@ const fetchMaxNotional = (
 	// Send request to Risk Management API
 	const response = sendRequester.sendRequest({
 		method: 'POST',
-		url: config.riskManagementApi.apiEndpoint,
+		url: config.riskAssessmentApi.apiEndpoint,
 		body: Buffer.from(requestBody).toString('base64'),
 		headers: {
 			'Content-Type': 'application/json',

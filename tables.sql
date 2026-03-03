@@ -62,3 +62,20 @@ CREATE INDEX idx_users_account_id ON users(account_id);
 
 -- Index for approved users
 CREATE INDEX idx_users_approved ON users(approved) WHERE approved = TRUE;
+
+-- Liquidation monitoring table - tracks account collateral and margin status
+CREATE TABLE liquidation_monitoring (
+    id                  SERIAL PRIMARY KEY,
+    account_id          VARCHAR(66) NOT NULL,                  -- bytes32 account ID
+    total_collateral    NUMERIC(78, 0) NOT NULL,               -- Total collateral amount (uint256)
+    maintenance_margin  NUMERIC(78, 0) NOT NULL,               -- Maintenance margin requirement (uint256)
+    collateral_token    VARCHAR(42) NOT NULL,                  -- Collateral token address
+    created_at          TIMESTAMPTZ DEFAULT NOW(),            -- Record creation timestamp
+    updated_at          TIMESTAMPTZ DEFAULT NOW()             -- Last update timestamp
+);
+
+-- Index for fast lookups by account_id
+CREATE INDEX idx_liquidation_monitoring_account_id ON liquidation_monitoring(account_id);
+
+-- Index for fast lookups by account_id + collateral_token combination
+CREATE INDEX idx_liquidation_monitoring_account_token ON liquidation_monitoring(account_id, collateral_token);

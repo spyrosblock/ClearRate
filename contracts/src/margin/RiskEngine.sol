@@ -39,8 +39,8 @@ contract RiskEngine is AccessControl {
     event RiskWeightUpdated(uint256 indexed tenor, uint256 oldWeight, uint256 newWeight);
     event ConfidenceUpdated(uint256 oldConfidence, uint256 newConfidence);
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
-    event AccountIMUpdated(bytes32 indexed accountId, uint256 oldIM, uint256 newIM);
-    event AccountMMUpdated(bytes32 indexed accountId, uint256 oldMM, uint256 newMM);
+    event AccountIMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldIM, uint256 newIM);
+    event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM);
 
     // ─── Errors ─────────────────────────────────────────────────────────
     error InsufficientInitialMargin(bytes32 accountId, uint256 required, uint256 available);
@@ -133,12 +133,14 @@ contract RiskEngine is AccessControl {
     /// @notice Check if an account has sufficient collateral to meet IM for a new trade.
     /// @param accountId The  account identifier.
     /// @param additionalIM The IM required for the new trade.
+    /// @param collateralToken The collateral token to check against.
     /// @return True if the account passes the IM check.
     function checkIM(
         bytes32 accountId,
-        uint256 additionalIM
+        uint256 additionalIM,
+        address collateralToken
     ) external view returns (bool) {
-        uint256 freeMargin = marginVault.getFreeMargin(accountId);
+        uint256 freeMargin = marginVault.getFreeMargin(accountId, collateralToken);
         return freeMargin >= additionalIM;
     }
 
@@ -175,7 +177,7 @@ contract RiskEngine is AccessControl {
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         uint256 oldIM = accountInitialMargin[accountId][collateralToken];
         accountInitialMargin[accountId][collateralToken] = newIM;
-        emit AccountIMUpdated(accountId, oldIM, newIM);
+        emit AccountIMUpdated(accountId, collateralToken, oldIM, newIM);
     }
 
     /// @notice Update the maintenance margin for an account for a specific collateral token.
@@ -189,6 +191,6 @@ contract RiskEngine is AccessControl {
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         uint256 oldMM = accountMaintenanceMargin[accountId][collateralToken];
         accountMaintenanceMargin[accountId][collateralToken] = newMM;
-        emit AccountMMUpdated(accountId, oldMM, newMM);
+        emit AccountMMUpdated(accountId, collateralToken, oldMM, newMM);
     }
 }

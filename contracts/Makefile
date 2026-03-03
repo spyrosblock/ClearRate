@@ -48,9 +48,15 @@ deploy-contracts-sepolia:
 		--optimizer-runs 200 \
 		--via-ir \
 		-vv
-	@echo "Update 'contracts/.env', 'create-trade-workflow/config.staging.json', 'settle-vm-workflow/config.staging.json', 'store-logs-workflow/config.staging.json', 'whitelist-user-workflow/config.staging.json' with new addresses"
-
-
+		@echo ""
+	@echo "IMPORTANT: Update the following files with new contract addresses:"
+	@echo "  - contracts/.env"
+	@echo "  - create-trade-workflow/config.staging.json"
+	@echo "  - settle-vm-workflow/config.staging.json"
+	@echo "  - store-logs-workflow/config.staging.json"
+	@echo "  - whitelist-user-workflow/config.staging.json"
+	@echo "IMPORTANT: Also reset the db"
+	@echo "  - curl https://clear-rate.vercel.app/api/restart-db-for-testing"
 # ============================================
 # WHITELIST USERS
 # ============================================

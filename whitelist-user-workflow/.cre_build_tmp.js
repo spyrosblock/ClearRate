@@ -15879,7 +15879,7 @@ var configSchema = exports_external.object({
   kybApi: exports_external.object({
     apiEndpoint: exports_external.string()
   }).optional(),
-  riskManagementApi: exports_external.object({
+  riskAssessmentApi: exports_external.object({
     apiEndpoint: exports_external.string()
   }).optional(),
   usersApi: exports_external.object({
@@ -15959,7 +15959,7 @@ var fetchKybVerification = (sendRequester, config, payload, accountId) => {
   return kybResponseSchema.parse(data);
 };
 var fetchMaxNotional = (sendRequester, config, payload, accountId) => {
-  if (!config.riskManagementApi?.apiEndpoint) {
+  if (!config.riskAssessmentApi?.apiEndpoint) {
     return {
       maxNotional: "10000000000000000000000000"
     };
@@ -15971,7 +15971,7 @@ var fetchMaxNotional = (sendRequester, config, payload, accountId) => {
   });
   const response = sendRequester.sendRequest({
     method: "POST",
-    url: config.riskManagementApi.apiEndpoint,
+    url: config.riskAssessmentApi.apiEndpoint,
     body: Buffer2.from(requestBody).toString("base64"),
     headers: {
       "Content-Type": "application/json"

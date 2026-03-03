@@ -9,8 +9,8 @@
   "kybApi": {
     "apiEndpoint": "https://api.production.com/kyb"
   },
-  "riskManagementApi": {
-    "apiEndpoint": "https://api.production.com/risk-management"
+  "riskAssessmentApi": {
+    "apiEndpoint": "https://api.production.com/risk-assessment"
   },
   "usersApi": {
     "apiEndpoint": "https://api.production.com/users"

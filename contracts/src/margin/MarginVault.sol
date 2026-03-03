@@ -19,19 +19,10 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     // ─── Roles ──────────────────────────────────────────────────────────
     bytes32 public constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
 
-    // ─── Structs ────────────────────────────────────────────────────────
-
-    /// @notice Margin account state for a participant.
-    struct MarginAccount {
-        uint256 totalCollateral;   // Total stableCollateral deposited (across all accepted tokens)
-        uint256 lockedIM;          // Collateral locked as Initial Margin
-        bool exists;               // Whether the account has been initialized
-    }
-
     // ─── State ──────────────────────────────────────────────────────────
 
     /// @notice Margin accounts indexed by accountId.
-    mapping(bytes32 => MarginAccount) public marginAccounts;
+    mapping(bytes32 => bool) public marginAccountExists;
 
     /// @notice Per-account per-token collateral breakdown.
     mapping(bytes32 => mapping(address => uint256)) public tokenCollateral;
@@ -53,7 +44,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount);
     event InitialMarginLocked(bytes32 indexed accountId, uint256 amount);
     event InitialMarginReleased(bytes32 indexed accountId, uint256 amount);
-    event VariationMarginSettled(bytes32 indexed accountId, int256 amount);
+    event VariationMarginSettled(bytes32 indexed accountId, address collateralToken, int256 amount);
     event TokenAccepted(address indexed token);
 
     // ─── Errors ─────────────────────────────────────────────────────────
@@ -104,21 +95,19 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
         if (amount == 0) revert ZeroAmount();
 
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) {
-            account.exists = true;
+        if (!marginAccountExists[accountId]) {
+            marginAccountExists[accountId] = true;
         }
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
-        account.totalCollateral += amount;
         tokenCollateral[accountId][token] += amount;
 
         emit MarginDeposited(accountId, token, amount);
     }
 
     /// @notice Withdraw collateral from a margin account.
-    /// @dev Can only withdraw from free margin (totalCollateral - lockedIM - vmDebit).
+    /// @dev Can only withdraw from free margin (totalCollateral - lockedIM).
     /// @param accountId The account identifier.
     /// @param token The stablecoin token to withdraw.
     /// @param amount The amount to withdraw.
@@ -136,10 +125,9 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert InvalidAddress();
 
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) revert AccountNotInitialized(accountId);
+        if (!marginAccountExists[accountId]) revert AccountNotInitialized(accountId);
 
-        uint256 free = getFreeMargin(accountId);
+        uint256 free = getFreeMarginByToken(accountId, token);
         if (amount > free) {
             revert InsufficientFreeMargin(accountId, amount, free);
         }
@@ -150,7 +138,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
             );
         }
 
-        account.totalCollateral -= amount;
         tokenCollateral[accountId][token] -= amount;
 
         IERC20(token).safeTransfer(to, amount);
@@ -170,8 +157,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) revert AccountNotInitialized(accountId);
+        if (!marginAccountExists[accountId]) revert AccountNotInitialized(accountId);
 
         // Check free margin in the specific token
         uint256 freeInToken = getFreeMarginByToken(accountId, token);
@@ -179,8 +165,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
             revert InsufficientFreeMargin(accountId, amount, freeInToken);
         }
 
-        // Update total locked IM and token-specific locked IM
-        account.lockedIM += amount;
         lockedIMByToken[accountId][token] += amount;
 
         emit InitialMarginLocked(accountId, amount);
@@ -198,17 +182,12 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) revert AccountNotInitialized(accountId);
+        if (!marginAccountExists[accountId]) revert AccountNotInitialized(accountId);
         
-        if (account.lockedIM < amount) {
-            revert InsufficientLockedMargin(accountId, amount, account.lockedIM);
-        }
         if (lockedIMByToken[accountId][token] < amount) {
             revert InsufficientLockedMargin(accountId, amount, lockedIMByToken[accountId][token]);
         }
 
-        account.lockedIM -= amount;
         lockedIMByToken[accountId][token] -= amount;
 
         emit InitialMarginReleased(accountId, amount);
@@ -226,22 +205,13 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
-        MarginAccount storage account = marginAccounts[accountId];
-        if (!account.exists) revert AccountNotInitialized(accountId);
+        if (!marginAccountExists[accountId]) revert AccountNotInitialized(accountId);
 
         // Update totalCollateral based on net VM
         if (amount > 0) {
-            account.totalCollateral += uint256(amount);
             tokenCollateral[accountId][token] += uint256(amount);
         } else if (amount < 0) {
             uint256 debit = uint256(-amount);
-            // Allow totalCollateral to go below lockedIM (triggers liquidation check)
-            if (account.totalCollateral >= debit) {
-                account.totalCollateral -= debit;
-            } else {
-                account.totalCollateral = 0;
-            }
-            // Reduce token-specific collateral
             if (tokenCollateral[accountId][token] >= debit) {
                 tokenCollateral[accountId][token] -= debit;
             } else {
@@ -249,7 +219,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
             }
         }
 
-        emit VariationMarginSettled(accountId, amount);
+        emit VariationMarginSettled(accountId, token, amount);
     }
 
     /// @notice Add an accepted stablecoin token.
@@ -262,22 +232,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     }
 
     // ─── View Functions ─────────────────────────────────────────────────
-
-    /// @notice Get the free (withdrawable) margin for an account.
-    /// @dev Free margin = totalCollateral - lockedIM.
-    ///      The variation margin is already incorporated into totalCollateral
-    ///      through the settleVariationMargin function.
-    /// @param accountId The account identifier.
-    /// @return free The amount of free margin available.
-    function getFreeMargin(bytes32 accountId) public view returns (uint256 free) {
-        MarginAccount memory account = marginAccounts[accountId];
-        if (account.totalCollateral >= account.lockedIM) {
-            free = account.totalCollateral - account.lockedIM;
-        } else {
-            // If totalCollateral < lockedIM (e.g., after large VM debit), free is 0
-            free = 0;
-        }
-    }
 
     /// @notice Get the free (withdrawable) margin for an account for a specific token.
     /// @dev Free margin = tokenCollateral - lockedIM in that token.
@@ -311,25 +265,11 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         return tokenCollateral[accountId][token];
     }
 
-    /// @notice Get the total collateral for an account (all tokens combined).
-    /// @param accountId The account identifier.
-    /// @return The total collateral amount.
-    function getTotalCollateral(bytes32 accountId) external view returns (uint256) {
-        return marginAccounts[accountId].totalCollateral;
-    }
-
-    /// @notice Get the locked initial margin for an account.
-    /// @param accountId The  account identifier.
-    /// @return The locked IM amount.
-    function getLockedIM(bytes32 accountId) external view returns (uint256) {
-        return marginAccounts[accountId].lockedIM;
-    }
-
     /// @notice Check if an account exists.
     /// @param accountId The  account identifier.
     /// @return True if the account has been initialized.
     function accountExists(bytes32 accountId) external view returns (bool) {
-        return marginAccounts[accountId].exists;
+        return marginAccountExists[accountId];
     }
 
     /// @notice Get the locked initial margin for an account for a specific token.

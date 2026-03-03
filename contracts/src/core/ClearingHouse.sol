@@ -244,10 +244,10 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         uint256 tenor = trade.maturityDate - trade.startDate;
         uint256 imRequired = riskEngine.calculateIM(trade.notional, tenor);
 
-        if (!riskEngine.checkIM(trade.partyA, imRequired)) {
+        if (!riskEngine.checkIM(trade.partyA, imRequired, trade.collateralToken)) {
             revert InsufficientMarginForTrade(trade.partyA);
         }
-        if (!riskEngine.checkIM(trade.partyB, imRequired)) {
+        if (!riskEngine.checkIM(trade.partyB, imRequired, trade.collateralToken)) {
             revert InsufficientMarginForTrade(trade.partyB);
         }
 

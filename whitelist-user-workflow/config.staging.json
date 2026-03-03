@@ -1,7 +1,7 @@
 {
   "evms": [
     {
-      "whitelistAddress": "0x0d3F055D422CF3375bdCf7dA93dd9d09CBbCdcBb",
+      "whitelistAddress": "0xe8CC412fF0Bc8B4532ac601c553ce8602f324bF7",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "500000"
     }
@@ -9,8 +9,8 @@
   "kybApi": {
     "apiEndpoint": "https://clear-rate.vercel.app/api/kyb"
   },
-  "riskManagementApi": {
-    "apiEndpoint": "https://clear-rate.vercel.app/api/risk-management"
+  "riskAssessmentApi": {
+    "apiEndpoint": "https://clear-rate.vercel.app/api/risk-assessment"
   },
   "usersApi": {
     "apiEndpoint": "https://clear-rate.vercel.app/api/users"

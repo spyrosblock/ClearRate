@@ -100,21 +100,26 @@ On payment dates (quarterly, semi-annual, etc.), the CCP calculates the net cash
 
 Example for how it's supposed to work
 
-1. Deploy contracts:
+1. [DEPLOY CONTRACTS] Deploy contracts:
 ```
 cd contracts && make deploy-contracts-sepolia && cd ..
 ```
 
-2. (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json`, `store-logs-workflow/config.staging.json` and `whitelist-user-workflow/config.staging.json` with new addresses)
+. [MANUAL UPDATE] (Update `contracts/.env`, `create-trade-workflow/config.staging.json`, `settle-vm-workflow/config.staging.json`, `store-logs-workflow/config.staging.json` and `whitelist-user-workflow/config.staging.json` with new addresses)
 
-3. Users call the whitelist-user-workflow to get whitelisted
+2. [HTTP TRIGGER] Users call the whitelist-user-workflow to get whitelisted
 ```
 cd whitelist-user-workflow && bun install && cd .. && cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/user_1.json)" --non-interactive --trigger-index 0 && cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/user_2.json)" --non-interactive --trigger-index 0
 ```
 
-4. Mint mock tokens and deposit collateral
+3. [SOLIDITY SCRIPT] Mint mock tokens and deposit collateral
 ```
 cd contracts && make deposit-margin-sepolia && cd ..
+```
+
+4. [LOG TRIGGER] The MarginDeposited event log triggers the store-logs-workflow (for both users) (event number 1 - 0-based)
+```
+cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
 ```
 
 5. Create trade JSON file
@@ -122,27 +127,27 @@ cd contracts && make deposit-margin-sepolia && cd ..
 cd contracts && make create-trade-sepolia && cd ..
 ```
 
-6. Call the cre api to create the swap
+1. Call the cre api to create the swap
 ```
 cd create-trade-workflow && bun install && cd .. && cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$(cat ./contracts/scripts-js/payloads/trade.json)" --non-interactive --trigger-index 0
 ```
 
-7. The TradeNovated event log triggers the store-logs-workflow (event number 11 - 0-based)
+1. The TradeNovated event log triggers the store-logs-workflow (event number 11 - 0-based)
 ```
 cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
 ```
 
-8. Settle the variation margin for all positions daily (if the endDate of the trade is in the past and the trade is active, the trade gets "matured")
+1. Settle the variation margin for all positions daily (if the endDate of the trade is in the past and the trade is active, the trade gets "matured")
 ```
 cd settle-vm-workflow && bun install && cd .. && cre workflow simulate settle-vm-workflow --target staging-settings --broadcast
 ```
 
-9. When the trade is matured, the PositionMatured event triggers the store-logs-workflow (event numbers 13 and 25 - 0-based)
+1.  When the trade is matured, the PositionMatured event triggers the store-logs-workflow (event numbers 13 and 25 - 0-based)
 ```
 cd store-logs-workflow && bun install && cd .. && cre workflow simulate store-logs-workflow --target staging-settings --broadcast
 ```
 
-10. The user can withdraw their collateral after the trade is settled
+1.   The user can withdraw their collateral after the trade is settled
 ```
 cd contracts && make withdraw-margin-sepolia && cd ..
 ```

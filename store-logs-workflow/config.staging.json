@@ -1,12 +1,17 @@
 {
   "evms": [
     {
-      "clearingHouseAddress": "0x2e05Db08F500ffde7767859E54D213f8d7583e0D",
+      "clearingHouseAddress": "0x96A59728B49AB037498E814aD27D5B892205D620",
+      "marginVaultAddress": "0x46581C3B8aE1b92f773d966b39531d8Fb803d71f",
+      "riskEngineAddress": "0xE32922F7B8AB2AC54eDb95d82CF2f6756A01584D",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "2000000"
     }
   ],
   "dbApi": {
     "url": "https://clear-rate.vercel.app/api/novated-positions"
+  },
+  "liquidationMonitoringApi": {
+    "url": "https://clear-rate.vercel.app/api/liquidation-monitoring"
   }
 }

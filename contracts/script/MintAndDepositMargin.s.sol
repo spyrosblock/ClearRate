@@ -138,11 +138,11 @@ contract MintAndDepositMargin is Script {
         // Check and show current margin balances
         console.log("\n--- Current Margin Account Status ---");
         
-        uint256 user1CurrentCollateral = marginVault.getTotalCollateral(accountId1);
+        uint256 user1CurrentCollateral = marginVault.getTotalCollateral(accountId1, collateralToken);
         console.log("User 1 Current Total Collateral:");
         console.logUint(user1CurrentCollateral);
 
-        uint256 user2CurrentCollateral = marginVault.getTotalCollateral(accountId2);
+        uint256 user2CurrentCollateral = marginVault.getTotalCollateral(accountId2, collateralToken);
         console.log("User 2 Current Total Collateral:");
         console.logUint(user2CurrentCollateral);
 
@@ -202,11 +202,11 @@ contract MintAndDepositMargin is Script {
         console.log("Deposit Summary");
         console.log("========================================");
 
-        uint256 user1NewCollateral = marginVault.getTotalCollateral(accountId1);
+        uint256 user1NewCollateral = marginVault.getTotalCollateral(accountId1, collateralToken);
         console.log("User 1 New Total Collateral:");
         console.logUint(user1NewCollateral);
 
-        uint256 user2NewCollateral = marginVault.getTotalCollateral(accountId2);
+        uint256 user2NewCollateral = marginVault.getTotalCollateral(accountId2, collateralToken);
         console.log("User 2 New Total Collateral:");
         console.logUint(user2NewCollateral);
 
