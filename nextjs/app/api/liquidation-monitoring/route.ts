@@ -6,10 +6,11 @@ import { sql } from '@/lib/db';
  * 
  * This endpoint retrieves a liquidation monitoring record for an account.
  * 
- * GET /api/liquidation-monitoring?accountId=0x...
+ * GET /api/liquidation-monitoring?accountId=0x...&collateralToken=0x...
  * 
  * Query parameters:
  * - accountId: string (required) - bytes32 account ID
+ * - collateralToken: string (optional) - Collateral token address to filter by
  * 
  * Response:
  * {
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     
     const accountId = searchParams.get('accountId');
+    const collateralToken = searchParams.get('collateralToken');
     
     // Validate required parameters
     if (!accountId) {
@@ -48,19 +50,45 @@ export async function GET(request: NextRequest) {
       );
     }
     
+    // Validate collateralToken format if provided (Ethereum address)
+    if (collateralToken && !/^0x[a-fA-F0-9]{40}$/.test(collateralToken)) {
+      return NextResponse.json(
+        { success: false, message: 'Invalid collateral token format - must be Ethereum address' },
+        { status: 400 }
+      );
+    }
+    
     // Query the liquidation monitoring record
-    const result = await sql`
-      SELECT 
-        id,
-        account_id as "accountId",
-        total_collateral as "totalCollateral",
-        maintenance_margin as "maintenanceMargin",
-        collateral_token as "collateralToken",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
-      FROM liquidation_monitoring 
-      WHERE account_id = ${accountId}
-    `;
+    let result;
+    if (collateralToken) {
+      // Filter by both accountId and collateralToken
+      result = await sql`
+        SELECT 
+          id,
+          account_id as "accountId",
+          total_collateral as "totalCollateral",
+          maintenance_margin as "maintenanceMargin",
+          collateral_token as "collateralToken",
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+        FROM liquidation_monitoring 
+        WHERE account_id = ${accountId} AND collateral_token = ${collateralToken}
+      `;
+    } else {
+      // Filter by accountId only
+      result = await sql`
+        SELECT 
+          id,
+          account_id as "accountId",
+          total_collateral as "totalCollateral",
+          maintenance_margin as "maintenanceMargin",
+          collateral_token as "collateralToken",
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+        FROM liquidation_monitoring 
+        WHERE account_id = ${accountId}
+      `;
+    }
     
     if (result.length === 0) {
       return NextResponse.json(
