@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Risk Management API
+ * Risk Assessment API
  * 
  * This endpoint calculates and returns risk parameters for whitelisted participants.
  * 
