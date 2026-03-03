@@ -140,7 +140,7 @@ contract RiskEngine is AccessControl {
         uint256 additionalIM,
         address collateralToken
     ) external view returns (bool) {
-        uint256 freeMargin = marginVault.getFreeMargin(accountId, collateralToken);
+        uint256 freeMargin = marginVault.getFreeMarginByToken(accountId, collateralToken);
         return freeMargin >= additionalIM;
     }
 

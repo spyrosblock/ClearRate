@@ -83,7 +83,7 @@ contract WithdrawMargin is Script {
         
         uint256 user1CurrentCollateral = marginVault.getTotalCollateral(accountId1, collateralToken);
         uint256 user1TokenCollateral = marginVault.tokenCollateral(accountId1, collateralToken);
-        uint256 user1FreeMargin = marginVault.getFreeMargin(accountId1, collateralToken);
+        uint256 user1FreeMargin = marginVault.getFreeMarginByToken(accountId1, collateralToken);
         console.log("User 1 Current Total Collateral:");
         console.logUint(user1CurrentCollateral);
         console.log("User 1 Token Collateral (USDC):");
@@ -93,7 +93,7 @@ contract WithdrawMargin is Script {
 
         uint256 user2CurrentCollateral = marginVault.getTotalCollateral(accountId2, collateralToken);
         uint256 user2TokenCollateral = marginVault.tokenCollateral(accountId2, collateralToken);
-        uint256 user2FreeMargin = marginVault.getFreeMargin(accountId2, collateralToken);
+        uint256 user2FreeMargin = marginVault.getFreeMarginByToken(accountId2, collateralToken);
         console.log("User 2 Current Total Collateral:");
         console.logUint(user2CurrentCollateral);
         console.log("User 2 Token Collateral (USDC):");
@@ -163,7 +163,7 @@ contract WithdrawMargin is Script {
         // ═══════════════════════════════════════════════════════════════════════
 
         // Refresh user2's free margin and token collateral (in case user1 withdrawal affected it, though they're separate accounts)
-        uint256 user2FreeMarginAfter = marginVault.getFreeMargin(accountId2, collateralToken);
+        uint256 user2FreeMarginAfter = marginVault.getFreeMarginByToken(accountId2, collateralToken);
         uint256 user2TokenCollateralAfter = marginVault.tokenCollateral(accountId2, collateralToken);
 
         console.log("\n[2/2] Withdrawing margin for User 2...");

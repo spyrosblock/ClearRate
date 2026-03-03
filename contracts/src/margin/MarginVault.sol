@@ -233,15 +233,6 @@ contract MarginVault is AccessControl, ReentrancyGuard {
 
     // ─── View Functions ─────────────────────────────────────────────────
 
-    /// @notice Get the free (withdrawable) margin for an account for a specific token.
-    /// @dev Free margin = tokenCollateral - lockedIM in that token.
-    /// @param accountId The account identifier.
-    /// @param token The collateral token.
-    /// @return free The amount of free margin available for the specific token.
-    function getFreeMargin(bytes32 accountId, address token) public view returns (uint256 free) {
-        return getFreeMarginByToken(accountId, token);
-    }
-
     /// @notice Get the free (withdrawable) margin for an account in a specific token.
     /// @dev Free margin in token = tokenCollateral - lockedIM in that token.
     /// @param accountId The account identifier.
