@@ -42,6 +42,16 @@ export async function GET() {
       // Continue even if this fails
     }
     
+    // Clear liquidation_monitoring table
+    try {
+      await sql`TRUNCATE TABLE liquidation_monitoring RESTART IDENTITY CASCADE`;
+      tablesCleared.push('liquidation_monitoring');
+      console.log('[Restart DB API] Cleared liquidation_monitoring table');
+    } catch (error) {
+      console.error('[Restart DB API] Error clearing liquidation_monitoring:', error);
+      // Continue even if this fails
+    }
+    
     console.log('[Restart DB API] Database reset completed');
     console.log('[Restart DB API] Tables cleared:', tablesCleared);
     
