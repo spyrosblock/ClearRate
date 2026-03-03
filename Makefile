@@ -77,7 +77,7 @@ deploy-contracts:
 
 # Whitelist user 1 and user 2 via whitelist-user-workflow
 whitelist-users:
-	@echo "Step 2: Whitelisting users via CRE workflow..."
+	@echo "Whitelisting users via CRE workflow..."
 	cd whitelist-user-workflow && bun install && cd ..
 	cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/user_1.json)" --non-interactive --trigger-index 0
 	cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/user_2.json)" --non-interactive --trigger-index 0
@@ -120,7 +120,7 @@ create-trade:
 
 # Settle variation margin for all positions daily
 settle-vm:
-	@echo "Step 8: Settling variation margin..."
+	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
 	cre workflow simulate settle-vm-workflow --target staging-settings --broadcast
 	@echo "Variation margin settled successfully!"
@@ -136,7 +136,7 @@ settle-vm:
 # Note: The api is mocked and all settlements have isFinal=false.
 #     So for the demo to work you have to manually change the todo in the workflow
 settle-vm-final:
-	@echo "Step 8: Settling variation margin..."
+	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
 	cre workflow simulate settle-vm-workflow --target staging-settings --broadcast
 	@echo "Variation margin settled successfully!"
@@ -151,7 +151,7 @@ settle-vm-final:
 # Withdraw collateral after trade is settled
 # Store MarginWithdrawn Event (1) ---> store-logs
 withdraw-margin:
-	@echo "Step 10: Withdrawing margin..."
+	@echo "Withdrawing margin..."
 	cd contracts && make withdraw-margin-sepolia
 	@echo "Margin withdrawn successfully!"
 	$(MAKE) store-logs
@@ -164,13 +164,6 @@ withdraw-margin:
 
 ###########  todo  #############
 
-
-
-# Withdraw collateral after trade is settled
-withdraw-margin:
-	@echo "Step 10: Withdrawing margin..."
-	cd contracts && make withdraw-margin-sepolia
-	@echo "Margin withdrawn successfully!"
 
 # ===============================================
 # READ COMMANDS
