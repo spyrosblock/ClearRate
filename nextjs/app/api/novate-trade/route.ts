@@ -89,8 +89,7 @@ export async function POST(request: Request) {
 					${payload.active},
 					${payload.lastNpv}
 				)
-				ON CONFLICT (token_id) DO UPDATE SET
-					owner_id = EXCLUDED.owner_id,
+				ON CONFLICT (token_id, owner_id) DO UPDATE SET
 					balance = EXCLUDED.balance,
 					notional = EXCLUDED.notional,
 					fixed_rate_bps = EXCLUDED.fixed_rate_bps,
@@ -139,8 +138,7 @@ export async function POST(request: Request) {
 					${payload.active},
 					${payload.lastNpv}
 				)
-				ON CONFLICT (token_id) DO UPDATE SET
-					owner_id = EXCLUDED.owner_id,
+				ON CONFLICT (token_id, owner_id) DO UPDATE SET
 					balance = EXCLUDED.balance,
 					notional = EXCLUDED.notional,
 					fixed_rate_bps = EXCLUDED.fixed_rate_bps,
