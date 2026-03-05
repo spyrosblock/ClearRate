@@ -22,13 +22,13 @@ export async function GET() {
     
     const tablesCleared: string[] = [];
     
-    // Clear novated_positions table
+    // Clear swap_positions table
     try {
-      await sql`TRUNCATE TABLE novated_positions RESTART IDENTITY CASCADE`;
-      tablesCleared.push('novated_positions');
-      console.log('[Restart DB API] Cleared novated_positions table');
+      await sql`TRUNCATE TABLE swap_positions RESTART IDENTITY CASCADE`;
+      tablesCleared.push('swap_positions');
+      console.log('[Restart DB API] Cleared swap_positions table');
     } catch (error) {
-      console.error('[Restart DB API] Error clearing novated_positions:', error);
+      console.error('[Restart DB API] Error clearing swap_positions:', error);
       // Continue with other tables even if one fails
     }
     
