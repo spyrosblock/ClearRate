@@ -38,6 +38,7 @@ const configSchema = z.object({
 	updateTotalCollateral: z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
+	isFinal: z.boolean().optional(),
 })
 
 type Config = z.infer<typeof configSchema>
@@ -455,8 +456,9 @@ const writeVMSettlement = (
 	
 	// TODO remove this testing line in prod
 	// the api is mocked and returns positions with isFinal set to false
-	// so if you want to test the final settlement, you can uncomment this line:
-	payload.settlements.forEach(s => s.isFinal = true);
+	// so if you can use the final-config.staging.json file to test final settlements
+	if (runtime.config.isFinal) payload.settlements.forEach(s => s.isFinal = true);
+	runtime.log(`Config: isFinal=${runtime.config.isFinal}`)
 
 	// Separate settlements into VM (regular) and matured (final) based on isFinal flag
 	const vmSettlements = payload.settlements.filter((s) => !s.isFinal)

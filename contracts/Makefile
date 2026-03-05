@@ -55,8 +55,25 @@ deploy-contracts-sepolia:
 	@echo "  - settle-vm-workflow/config.staging.json"
 	@echo "  - store-logs-workflow/config.staging.json"
 	@echo "  - whitelist-user-workflow/config.staging.json"
+	@echo "  - liquidate-workflow/config.staging.json"
 	@echo "IMPORTANT: Also reset the db"
 	@echo "  - curl https://clear-rate.vercel.app/api/restart-db-for-testing"
+
+# ============================================
+# UPDATE CONFIG ADDRESSES
+# ============================================
+
+update-config-addresses:
+	@node scripts-js/updateConfigAddresses.js
+
+
+# ============================================
+# UPDATE CONFIG ADDRESSES
+# ============================================
+
+generate-whitelist-inputs:
+	@node scripts-js/generateWhitelistInputs.js
+
 # ============================================
 # WHITELIST USERS
 # ============================================
@@ -74,9 +91,9 @@ whitelist-users-sepolia:
 # MARGIN DEPOSITS & WITHDRAWALS
 # ============================================
 
-# Mint mock tokens and deposit margin for 2 users on Sepolia
+# Mint mock tokens and deposit margin for 3 users on Sepolia
 deposit-margin-sepolia:
-	@echo "Depositing margin for 2 users on Ethereum Sepolia..."
+	@echo "Depositing margin for 3 users on Ethereum Sepolia..."
 	@forge script script/MintAndDepositMargin.s.sol:MintAndDepositMargin \
 		--rpc-url sepolia \
 		--broadcast \
@@ -91,6 +108,19 @@ withdraw-margin-sepolia:
 		--broadcast \
 		-vv
 	@echo "Margin withdrawal complete!"
+
+# ============================================
+# USER 3 ABSORBS POSITIONS FROM USER 2
+# ============================================
+
+# Whitelist 2 users on Sepolia
+absorb-positions-sepolia:
+	@echo "User 3 absorbs positions from User 2..."
+	@forge script script/AbsorbPositions.s.sol:AbsorbPositions \
+		--rpc-url sepolia \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--broadcast \
+		-vv
 
 # ============================================
 # READ MARGIN DATA
@@ -132,38 +162,5 @@ create-trade-sepolia:
 extract-abis:
 	node scripts-js/extractAbis.js
 
-# ============================================
-# ENVIRONMENT
-# ============================================
 
 -include .env
-
-help:
-	@echo "ClearRate Makefile Commands"
-	@echo "==========================="
-	@echo ""
-	@echo "Build & Test:"
-	@echo "  make build           - Compile all contracts"
-	@echo "  make test           - Run all tests"
-	@echo "  make format         - Format Solidity code"
-	@echo ""
-	@echo "Deployment:"
-	@echo "  make deploy-sepolia    - Deploy to Ethereum Sepolia"
-	@echo ""
-	@echo "Whitelist:"
-	@echo "  make whitelist-users-sepolia - Whitelist 2 users on Ethereum Sepolia"
-	@echo ""
-	@echo "Margin:"
-	@echo "  make deposit-margin-sepolia    - Deposit margin for 2 users on Ethereum Sepolia"
-	@echo "  make withdraw-margin-sepolia  - Withdraw margin for 2 users on Ethereum Sepolia"
-	@echo "  make get-margin-data-sepolia   - Read all margin data for all accounts on Ethereum Sepolia"
-	@echo ""
-	@echo "Utilities:"
-	@echo "  make extract-abis  - Extract contract ABIs"
-	@echo "  make clean         - Clean build artifacts"
-	@echo ""
-	@echo "Environment variables (see .env.example):"
-	@echo "  DEPLOYER_PRIVATE_KEY  - Private key for deployment"
-	@echo "  ETHERSCAN_API_KEY     - Etherscan API key for verification"
-	@echo "  ETH_RPC_URL           - RPC URL for fork testing"
-	@echo ""

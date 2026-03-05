@@ -1,0 +1,20 @@
+{
+  "address": "0x10Db2E70118e5FBeDa30391ec957e608C9E4517E",
+  "company": {
+    "companyName": "Global Finance Partners",
+    "registrationNumber": "GFP987654321",
+    "registeredCountry": "GB",
+    "contactEmail": "info@globalfinancepartners.co.uk",
+    "lei": "549300ABCDEFGH123456",
+    "website": "https://www.globalfinancepartners.co.uk",
+    "uploadedLegalDocs": {
+      "articlesOfAssociation": "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/articles_of_association.pdf",
+      "certificateOfIncorporation": "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/certificate_of_incorporation.pdf",
+      "vatCertificate": "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/vat_certificate.pdf"
+    },
+    "bankDetails": {
+      "iban": "GB29NWBK60161331926819",
+      "bic": "NWBKGB2LXXX"
+    }
+  }
+}

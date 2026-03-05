@@ -9,7 +9,7 @@ CREATE TABLE novated_positions (
     token_id_b      VARCHAR(78) NOT NULL,                  -- uint256 as string (ERC-1155 token ID for party B)
     party_a         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (pays fixed)
     party_b         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (receives fixed)
-    notional        NUMERIC(78, 0) NOT NULL,               -- Current notional amount (may be reduced after compression)
+    notional        NUMERIC(78, 0) NOT NULL,               -- Notional amount
     fixed_rate_bps  INTEGER NOT NULL,                       -- Fixed rate in basis points
     start_date      TIMESTAMPTZ NOT NULL,                  -- Swap effective date
     maturity_date   TIMESTAMPTZ NOT NULL,                  -- Swap maturity date

@@ -66,21 +66,28 @@ store-logs:
 # ===============================================
 
 # Deploy contracts to Sepolia
-# IMPORTANT - Update .env and config.staging.json files
 deploy-contracts:
-	cd contracts && make deploy-contracts-sepolia
 	curl https://clear-rate.vercel.app/api/restart-db-for-testing
+	cd contracts && make deploy-contracts-sepolia
+
+# IMPORTANT - After deploying, update the contracts/.env file
+
+# After undating the .env update the configs of the workflows
+update-config-addresses:
+	cd contracts && make update-config-addresses
 
 # ===============================================
 # STEP 2: WHITELIST USERS
 # ===============================================
 
-# Whitelist user 1 and user 2 via whitelist-user-workflow
+# Whitelist users 1, 2 and 3 via whitelist-user-workflow
 whitelist-users:
+	cd contracts && make generate-whitelist-inputs
 	@echo "Whitelisting users via CRE workflow..."
 	cd whitelist-user-workflow && bun install && cd ..
 	cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/user_1.json)" --non-interactive --trigger-index 0
 	cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/user_2.json)" --non-interactive --trigger-index 0
+	cre workflow simulate whitelist-user-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/user_3.json)" --non-interactive --trigger-index 0
 	@echo "Users whitelisted successfully!"
 
 # ===============================================
@@ -89,8 +96,11 @@ whitelist-users:
 
 # Mint mock tokens and deposit collateral for users
 # Store MarginDeposited Event (1) - MarginVault.sol
+# Store MarginDeposited Event (1) - MarginVault.sol
+# Store MarginDeposited Event (1) - MarginVault.sol
 deposit-margin:
 	cd contracts && make deposit-margin-sepolia
+	$(MAKE) store-logs
 	$(MAKE) store-logs
 	$(MAKE) store-logs
 
@@ -129,16 +139,14 @@ settle-vm:
 # STEP 6: SETTLE VARIATION MARGIN - FINAL
 # ===============================================
 
-# Settle variation margin for all positions daily
+# Final variation margin settlement for all positions
 # Store PositionMatured Event (13) - ClearingHouse.sol
 # Store AccountMMUpdated Event (5) - RiskEngine.sol
 # Store AccountMMUpdated Event (6) - RiskEngine.sol
-# Note: The api is mocked and all settlements have isFinal=false.
-#     So for the demo to work you have to manually change the todo in the workflow
 settle-vm-final:
 	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
-	cre workflow simulate settle-vm-workflow --target staging-settings --broadcast
+	cre workflow simulate settle-vm-workflow --target final-staging-settings --broadcast
 	@echo "Variation margin settled successfully!"
 	$(MAKE) store-logs
 	$(MAKE) store-logs
@@ -149,7 +157,7 @@ settle-vm-final:
 # ===============================================
 
 # Withdraw collateral after trade is settled
-# Store MarginWithdrawn Event (1) ---> store-logs
+# Store MarginWithdrawn Event (1) - MarginVault.sol
 withdraw-margin:
 	@echo "Withdrawing margin..."
 	cd contracts && make withdraw-margin-sepolia
@@ -157,13 +165,26 @@ withdraw-margin:
 	$(MAKE) store-logs
 	$(MAKE) store-logs
 
-
 # ===============================================
 # LIQUIDATION
 # ===============================================
 
-###########  todo  #############
+# before withdrawing
+# make create-trade
+# make withdraw-margin
+# make settle-vm
 
+# Liquidate the liquidatable users
+liquidation:
+	@echo "Liquidating..."
+	cd liquidation-workflow && bun install
+	cre workflow simulate liquidation-workflow --target staging-settings --broadcast
+
+# Store PositionsAbsorbed Event (10) - LiquidationEngine.sol
+absorb-positions:
+	@echo "Absorbing positions..."
+	cd contracts && make absorb-positions-sepolia
+	$(MAKE) store-logs
 
 # ===============================================
 # READ COMMANDS
@@ -174,42 +195,6 @@ get-margin-data:
 	cd contracts && make get-margin-data-sepolia
 
 # ===============================================
-# CONVENIENCE TARGETS
+# TROUBLESHOOT
 # ===============================================
-
-# Run steps 1-4 (deploy to deposit)
-setup:
-	@echo "Running setup (steps 1-4)..."
-	$(MAKE) deploy-contracts
-	@echo ""
-	@echo "Manual step required: Update config files with new addresses"
-	@echo "Press Enter when done..."
-	@read confirm
-	$(MAKE) whitelist-users
-	$(MAKE) deposit-margin
-	$(MAKE) store-logs
-	@echo "Setup complete!"
-
-# Run steps 5-7 (create trade)
-trade:
-	@echo "Running trade creation (steps 5-7)..."
-	$(MAKE) create-trade-json
-	$(MAKE) create-trade
-	$(MAKE) store-logs
-	@echo "Trade creation complete!"
-
-# Run steps 8-10 (settle and withdraw)
-settle:
-	@echo "Running settlement (steps 8-10)..."
-	$(MAKE) settle-vm
-	$(MAKE) store-logs
-	$(MAKE) withdraw-margin
-	@echo "Settlement complete!"
-
-# Full lifecycle (all steps)
-full-lifecycle:
-	@echo "Running full lifecycle..."
-	$(MAKE) setup
-	$(MAKE) trade
-	$(MAKE) settle
-	@echo "Full lifecycle complete!"
+- May need to run: bun x cre-setup on each workflow

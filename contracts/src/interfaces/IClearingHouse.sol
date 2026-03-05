@@ -104,6 +104,12 @@ interface IClearingHouse {
     );
     event PositionMatured(bytes32 indexed tradeId, uint256 timestamp);
     event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+    event PositionsTransferred(
+        bytes32 indexed fromAccount,
+        bytes32 indexed toAccount,
+        bytes32[] positionIds,
+        address collateralToken
+    );
 
     // ─── Errors ─────────────────────────────────────────────────────────
 

@@ -1,17 +1,21 @@
 {
   "evms": [
     {
-      "clearingHouseAddress": "0x96A59728B49AB037498E814aD27D5B892205D620",
-      "marginVaultAddress": "0x46581C3B8aE1b92f773d966b39531d8Fb803d71f",
-      "riskEngineAddress": "0xE32922F7B8AB2AC54eDb95d82CF2f6756A01584D",
+      "clearingHouseAddress": "0xcf7d004590b7e1bbde71c94aade8f2e4dda9b5c2",
+      "marginVaultAddress": "0x47a45c5b6bfbc9711c40b7de3f50ed4ad70bc965",
+      "riskEngineAddress": "0x7b2bd93cee13edf5617dbc31663f80ae373c2147",
+      "liquidationEngineAddress": "0xb72f717365d137f0c689196051f4867171e5aa1c",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "2000000"
     }
   ],
-  "dbApi": {
+  "novatedPositionsApi": {
     "url": "https://clear-rate.vercel.app/api/novated-positions"
   },
   "liquidationMonitoringApi": {
     "url": "https://clear-rate.vercel.app/api/liquidation-monitoring"
+  },
+  "absorbPositionsApi": {
+    "url": "https://clear-rate.vercel.app/api/absorb-positions"
   }
 }

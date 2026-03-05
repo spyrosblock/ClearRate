@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console2} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IClearingHouse} from "../../src/interfaces/IClearingHouse.sol";
 import {ClearingHouse} from "../../src/core/ClearingHouse.sol";
@@ -9,6 +9,8 @@ import {IRSInstrument} from "../../src/core/IRSInstrument.sol";
 import {MarginVault} from "../../src/margin/MarginVault.sol";
 import {RiskEngine} from "../../src/margin/RiskEngine.sol";
 import {Whitelist} from "../../src/access/Whitelist.sol";
+import {LiquidationEngine} from "../../src/liquidation/LiquidationEngine.sol";
+import {InsuranceFund} from "../../src/insurance/InsuranceFund.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
@@ -22,6 +24,8 @@ contract ClearingHouseIntegrationTest is Test {
     MarginVault internal marginVault;
     RiskEngine internal riskEngine;
     Whitelist internal whitelist;
+    LiquidationEngine internal liquidationEngine;
+    InsuranceFund internal insuranceFund;
     ERC20Mock internal usdc;
     ERC20Mock internal dai;
 
@@ -55,6 +59,7 @@ contract ClearingHouseIntegrationTest is Test {
     bytes32 internal constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
+    bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
     // ─── Setup ──────────────────────────────────────────────────────────
 
@@ -111,6 +116,7 @@ contract ClearingHouseIntegrationTest is Test {
         vm.startPrank(admin);
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
+        marginVault.grantRole(LIQUIDATION_ENGINE_ROLE, address(liquidationEngine));
         riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         whitelist.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
 
@@ -118,6 +124,31 @@ contract ClearingHouseIntegrationTest is Test {
         riskEngine.setRiskWeight(NINETY_DAYS, 100);   // 1% for 90 days
         riskEngine.setRiskWeight(ONE_YEAR, 200);      // 2% for 1 year
         riskEngine.setRiskWeight(2 * ONE_YEAR, 300); // 3% for 2 years
+
+        // Deploy InsuranceFund
+        address[] memory insuranceTokens = new address[](1);
+        insuranceTokens[0] = address(usdc);
+        insuranceFund = new InsuranceFund(admin, insuranceTokens);
+
+        // Deploy LiquidationEngine
+        liquidationEngine = new LiquidationEngine(
+            admin,
+            forwarder,
+            address(clearingHouse),
+            address(riskEngine),
+            address(marginVault),
+            address(insuranceFund),
+            address(whitelist),
+            3600, // 1 hour auction duration
+            500   // 5% starting premium
+        );
+
+        // Wire up roles for liquidation
+        vm.startPrank(admin);
+        clearingHouse.grantRole(clearingHouse.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
+        marginVault.grantRole(marginVault.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
+        liquidationEngine.grantRole(liquidationEngine.CLEARING_HOUSE_ROLE(), address(clearingHouse));
+
 
         // Grant operator & settler roles - forwarder needs OPERATOR_ROLE to call onReport
         clearingHouse.grantRole(OPERATOR_ROLE, forwarder);
@@ -144,8 +175,8 @@ contract ClearingHouseIntegrationTest is Test {
         assertTrue(whitelist.isWhitelisted(alice));
         assertTrue(whitelist.isWhitelisted(bob));
         
-        uint256 aliceFreeBefore = marginVault.getFreeMargin(ALICE_ACCOUNT);
-        uint256 bobFreeBefore = marginVault.getFreeMargin(BOB_ACCOUNT);
+        uint256 aliceFreeBefore = marginVault.getFreeMarginByToken(ALICE_ACCOUNT, address(usdc));
+        uint256 bobFreeBefore = marginVault.getFreeMarginByToken(BOB_ACCOUNT, address(usdc));
         assertEq(aliceFreeBefore, 2_000_000e6);
         assertEq(bobFreeBefore, 2_000_000e6);
 
@@ -205,14 +236,14 @@ contract ClearingHouseIntegrationTest is Test {
 
         // Verify IM was locked
         uint256 expectedIM = riskEngine.calculateIM(NOTIONAL, ONE_YEAR);
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), expectedIM);
-        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), expectedIM);
-        assertEq(marginVault.getFreeMargin(ALICE_ACCOUNT), aliceFreeBefore - expectedIM);
-        assertEq(marginVault.getFreeMargin(BOB_ACCOUNT), bobFreeBefore - expectedIM);
+        assertEq(marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc)), expectedIM);
+        assertEq(marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc)), expectedIM);
+        assertEq(marginVault.getFreeMarginByToken(ALICE_ACCOUNT, address(usdc)), aliceFreeBefore - expectedIM);
+        assertEq(marginVault.getFreeMarginByToken(BOB_ACCOUNT, address(usdc)), bobFreeBefore - expectedIM);
 
         // Verify account positions tracked
-        bytes32[] memory alicePositions = clearingHouse.getAccountPositions(ALICE_ACCOUNT);
-        bytes32[] memory bobPositions = clearingHouse.getAccountPositions(BOB_ACCOUNT);
+        bytes32[] memory alicePositions = clearingHouse.getAccountPositions(ALICE_ACCOUNT, address(usdc));
+        bytes32[] memory bobPositions = clearingHouse.getAccountPositions(BOB_ACCOUNT, address(usdc));
         assertEq(alicePositions.length, 1);
         assertEq(alicePositions[0], tradeId);
         assertEq(bobPositions.length, 1);
@@ -221,8 +252,8 @@ contract ClearingHouseIntegrationTest is Test {
         // ═══════════════════════════════════════════════════════════════════════════════
         // Step 3: Settle variation margin via onReport
         // ═══════════════════════════════════════════════════════════════════════════════
-        uint256 aliceCollateralBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
-        uint256 bobCollateralBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
+        uint256 aliceCollateralBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 bobCollateralBefore = marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc));
 
         // Alice (fixed payer) profits from rate increase
         int256 npvChange = 10_000e6; // $10k profit for Alice
@@ -241,8 +272,8 @@ contract ClearingHouseIntegrationTest is Test {
         clearingHouse.onReport("", report);
 
         // Verify VM settlement
-        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceCollateralBefore + uint256(npvChange));
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobCollateralBefore - uint256(npvChange));
+        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc)), aliceCollateralBefore + uint256(npvChange));
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc)), bobCollateralBefore - uint256(npvChange));
 
         // Verify lastNpv updated
         IClearingHouse.NovatedPosition memory posAfterVM = clearingHouse.getPosition(tradeId);
@@ -255,8 +286,8 @@ contract ClearingHouseIntegrationTest is Test {
         vm.warp(block.timestamp + ONE_YEAR + 1);
 
         // Settle the matured position
-        uint256 aliceLockedBeforeMaturity = marginVault.getLockedIM(ALICE_ACCOUNT);
-        uint256 bobLockedBeforeMaturity = marginVault.getLockedIM(BOB_ACCOUNT);
+        uint256 aliceLockedBeforeMaturity = marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc));
+        uint256 bobLockedBeforeMaturity = marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc));
 
         // Submit matured position settlement via onReport
         // Report type 2 = matured position settlement
@@ -272,8 +303,8 @@ contract ClearingHouseIntegrationTest is Test {
         assertFalse(posMatured.active);
 
         // Verify IM released
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), aliceLockedBeforeMaturity - expectedIM);
-        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), bobLockedBeforeMaturity - expectedIM);
+        assertEq(marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc)), aliceLockedBeforeMaturity - expectedIM);
+        assertEq(marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc)), bobLockedBeforeMaturity - expectedIM);
 
         // Verify tokens burned
         assertEq(instrument.balanceOf(alice, posMatured.tokenIdA), 0);
@@ -285,8 +316,259 @@ contract ClearingHouseIntegrationTest is Test {
         assertEq(clearingHouse.activePositionCount(), 0);
 
         // Both should have their IM released
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), 0);
-        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), 0);
+        assertEq(marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc)), 0);
+        assertEq(marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc)), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  Liquidation Process Test
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    /// @notice Test the complete liquidation process: trade → adverse VM → liquidation → auction → absorb
+    function test_liquidationProcess_integration() public {
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 1: Create a trade with Alice (undercollateralized after adverse move)
+        // ═══════════════════════════════════════════════════════════════════════════════
+        bytes32 tradeId = keccak256("TRADE_LIQUIDATION_1");
+        
+        IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
+            tradeId: tradeId,
+            partyA: ALICE_ACCOUNT,
+            partyB: BOB_ACCOUNT,
+            notional: NOTIONAL,
+            fixedRateBps: FIXED_RATE_BPS,
+            startDate: block.timestamp,
+            maturityDate: block.timestamp + ONE_YEAR,
+            paymentInterval: NINETY_DAYS,
+            dayCountConvention: 0,
+            floatingRateIndex: SOFR_INDEX,
+            nonce: 2,
+            deadline: block.timestamp + 1 hours,
+            collateralToken: address(usdc)
+        });
+
+        bytes memory sigA = _signTrade(trade, aliceWallet);
+        bytes memory sigB = _signTrade(trade, bobWallet);
+
+        // Submit trade via onReport
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
+
+        // Verify trade was submitted and IM locked
+        assertTrue(clearingHouse.tradeSubmitted(tradeId));
+        assertEq(clearingHouse.activePositionCount(), 1);
+
+        uint256 expectedIM = riskEngine.calculateIM(NOTIONAL, ONE_YEAR);
+        assertEq(marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc)), expectedIM);
+        assertEq(marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc)), expectedIM);
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 2: Simulate adverse move for Alice (fixed payer loses money)
+        // ═══════════════════════════════════════════════════════════════════════════════
+        uint256 aliceCollateralBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 bobCollateralBefore = marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc));
+
+        // Alice (fixed payer) loses money from rate decrease - large negative NPV
+        int256 adverseNpvChange = -1_990_000e6; // $1.99M loss for Alice
+
+        // Submit VM settlement via onReport
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](1);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId, npvChange: adverseNpvChange});
+        
+        report = abi.encode(uint8(1), settlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
+
+        // Verify Alice's collateral decreased (she lost money)
+        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc)), aliceCollateralBefore - 1_990_000e6);
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc)), bobCollateralBefore + 1_990_000e6);
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 3: Verify Alice is now undercollateralized and liquidatable
+        // ═══════════════════════════════════════════════════════════════════════════════
+        uint256 aliceTotalCollateral = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 aliceMM = riskEngine.accountMaintenanceMargin(ALICE_ACCOUNT, address(usdc));
+
+        // Alice should be undercollateralized (total collateral < MM)
+        assertTrue(aliceTotalCollateral < aliceMM, "Alice should be undercollateralized");
+        assertTrue(riskEngine.isLiquidatable(ALICE_ACCOUNT, address(usdc)), "Alice should be liquidatable");
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 4: Start liquidation auction
+        // ═══════════════════════════════════════════════════════════════════════════════
+        vm.startPrank(charlie); // Liquidator starts auction
+        
+        // Verify no auction exists before
+        assertFalse(liquidationEngine.isAuctionActive(ALICE_ACCOUNT, address(usdc)));
+        
+        // Start liquidation
+        LiquidationEngine.LiquidationTarget[] memory liquidationTargets = new LiquidationEngine.LiquidationTarget[](1); 
+        liquidationTargets[0] = LiquidationEngine.LiquidationTarget({accountId: ALICE_ACCOUNT, collateralToken: address(usdc)});
+        liquidationEngine.liquidateAccounts(liquidationTargets);
+
+        // Verify auction started
+        assertTrue(liquidationEngine.isAuctionActive(ALICE_ACCOUNT, address(usdc)));
+        
+        // Verify auction details
+        uint256 currentPremium = liquidationEngine.getCurrentPremium(ALICE_ACCOUNT, address(usdc));
+        assertEq(currentPremium, 500); // 5% starting premium
+
+        vm.stopPrank();
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 5: Wait for auction to progress and premium to decay
+        // ═══════════════════════════════════════════════════════════════════════════════
+        vm.warp(block.timestamp + 1800); // Wait 30 minutes (half of 1-hour auction)
+
+        // Premium should have decayed
+        uint256 decayedPremium = liquidationEngine.getCurrentPremium(ALICE_ACCOUNT, address(usdc));
+        assertTrue(decayedPremium < 500, "Premium should have decayed");
+        assertTrue(decayedPremium > 0, "Premium should not be zero yet");
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 6: Liquidator absorbs position at current premium
+        // ═══════════════════════════════════════════════════════════════════════════════
+        vm.startPrank(charlie);
+        
+        // Get Charlie's collateral before absorption
+        uint256 charlieCollateralBefore = marginVault.getTotalCollateral(CHARLIE_ACCOUNT, address(usdc));
+        
+        console2.log(charlie);
+        // Absorb Alice's position
+        liquidationEngine.absorbPositions(ALICE_ACCOUNT, address(usdc));
+
+        // Verify auction ended
+        assertFalse(liquidationEngine.isAuctionActive(ALICE_ACCOUNT, address(usdc)));
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 7: Verify position transfer and margin handling
+        // ═══════════════════════════════════════════════════════════════════════════════
+        
+        // Verify position was transferred to Charlie
+        IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
+        assertEq(pos.partyA, CHARLIE_ACCOUNT, "Position should be transferred to liquidator");
+        assertEq(pos.partyB, BOB_ACCOUNT, "Counterparty should remain Bob");
+
+        // Verify Charlie now has the position in his account
+        bytes32[] memory charliePositions = clearingHouse.getAccountPositions(CHARLIE_ACCOUNT, address(usdc));
+        assertEq(charliePositions.length, 1);
+        assertEq(charliePositions[0], tradeId);
+
+        // Verify Alice no longer has the position
+        bytes32[] memory alicePositions = clearingHouse.getAccountPositions(ALICE_ACCOUNT, address(usdc));
+        assertEq(alicePositions.length, 0);
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 8: Verify margin requirements and premium transfer
+        // ═══════════════════════════════════════════════════════════════════════════════
+        
+        // Charlie should have IM locked for the position
+        uint256 charlieLockedIM = marginVault.getLockedIMByToken(CHARLIE_ACCOUNT, address(usdc));
+        assertEq(charlieLockedIM, expectedIM, "Charlie should have IM locked");
+
+        // Charlie should have received premium from Alice's remaining collateral
+        uint256 charlieCollateralAfter = marginVault.getTotalCollateral(CHARLIE_ACCOUNT, address(usdc));
+        uint256 premiumReceived = charlieCollateralAfter - charlieCollateralBefore;
+        assertTrue(premiumReceived > 0, "Charlie should have received premium");
+
+        // Alice's remaining collateral should be reduced by the premium
+        uint256 aliceCollateralAfter = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 aliceCollateralUsedForPremium = aliceTotalCollateral - aliceCollateralAfter;
+        assertEq(premiumReceived, aliceCollateralUsedForPremium, "Premium should match collateral transferred");
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 9: Verify maintenance margin updates
+        // ═══════════════════════════════════════════════════════════════════════════════
+        
+        // Charlie's MM should be updated based on his new IM requirement
+        uint256 charlieMM = riskEngine.accountMaintenanceMargin(CHARLIE_ACCOUNT, address(usdc));
+        assertEq(charlieMM, riskEngine.calculateMM(expectedIM), "Charlie's MM should be based on his IM");
+
+        // Alice's MM should be zero (no positions)
+        uint256 aliceMMAfter = riskEngine.accountMaintenanceMargin(ALICE_ACCOUNT, address(usdc));
+        assertEq(aliceMMAfter, 0, "Alice's MM should be zero after liquidation");
+
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Step 10: Verify notional tracking
+        // ═══════════════════════════════════════════════════════════════════════════════
+        
+        // Charlie should have notional tracked
+        uint256 charlieNotional = whitelist.getTotalOpenNotional(charlie);
+        assertEq(charlieNotional, NOTIONAL, "Charlie should have notional tracked");
+
+        // Alice should have zero notional
+        uint256 aliceNotional = whitelist.getTotalOpenNotional(alice);
+        assertEq(aliceNotional, 0, "Alice should have zero notional after liquidation");
+
+        vm.stopPrank();
+    }
+
+    /// @notice Test liquidation when Alice has insufficient collateral to cover premium
+    function test_liquidationWithInsufficientCollateral() public {
+        // Create trade
+        bytes32 tradeId = keccak256("TRADE_LIQUIDATION_2");
+        
+        IClearingHouse.MatchedTrade memory trade = IClearingHouse.MatchedTrade({
+            tradeId: tradeId,
+            partyA: ALICE_ACCOUNT,
+            partyB: BOB_ACCOUNT,
+            notional: NOTIONAL,
+            fixedRateBps: FIXED_RATE_BPS,
+            startDate: block.timestamp,
+            maturityDate: block.timestamp + ONE_YEAR,
+            paymentInterval: NINETY_DAYS,
+            dayCountConvention: 0,
+            floatingRateIndex: SOFR_INDEX,
+            nonce: 3,
+            deadline: block.timestamp + 1 hours,
+            collateralToken: address(usdc)
+        });
+
+        bytes memory sigA = _signTrade(trade, aliceWallet);
+        bytes memory sigB = _signTrade(trade, bobWallet);
+
+        bytes memory report = abi.encode(uint8(0), trade, sigA, sigB);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
+
+        // Simulate massive adverse move that wipes out Alice's collateral
+        int256 massiveLoss = -2_500_000e6; // More than Alice's total collateral
+
+        IClearingHouse.VMSettlement[] memory settlements = new IClearingHouse.VMSettlement[](1);
+        settlements[0] = IClearingHouse.VMSettlement({tradeId: tradeId, npvChange: massiveLoss});
+        
+        report = abi.encode(uint8(1), settlements);
+        vm.prank(forwarder);
+        clearingHouse.onReport("", report);
+
+        // Alice should be bankrupt (negative collateral)
+        uint256 aliceCollateral = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        assertEq(aliceCollateral, 0, "Alice's collateral should be zero after massive loss");
+
+        // Alice should still be liquidatable
+        assertTrue(riskEngine.isLiquidatable(ALICE_ACCOUNT, address(usdc)));
+
+        // Start liquidation
+        vm.startPrank(charlie);
+        LiquidationEngine.LiquidationTarget[] memory liquidationTargets = new LiquidationEngine.LiquidationTarget[](1); 
+        liquidationTargets[0] = LiquidationEngine.LiquidationTarget({accountId: ALICE_ACCOUNT, collateralToken: address(usdc)});
+        liquidationEngine.liquidateAccounts(liquidationTargets);
+        assertTrue(liquidationEngine.isAuctionActive(ALICE_ACCOUNT, address(usdc)));
+
+        // Liquidator absorbs position
+        liquidationEngine.absorbPositions(ALICE_ACCOUNT, address(usdc));
+
+        // Verify position transferred to Charlie
+        IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
+        assertEq(pos.partyA, CHARLIE_ACCOUNT);
+
+        // Charlie should have IM locked and MM updated
+        uint256 expectedIM = riskEngine.calculateIM(NOTIONAL, ONE_YEAR);
+        assertEq(marginVault.getLockedIMByToken(CHARLIE_ACCOUNT, address(usdc)), expectedIM);
+        assertEq(riskEngine.accountMaintenanceMargin(CHARLIE_ACCOUNT, address(usdc)), riskEngine.calculateMM(expectedIM));
+
+        vm.stopPrank();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════

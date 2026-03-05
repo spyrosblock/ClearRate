@@ -33,6 +33,7 @@ contract Deploy is ClearRateScript {
     bytes32 internal constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
     bytes32 internal constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
     bytes32 internal constant WHITELIST_ADMIN_ROLE = keccak256("WHITELIST_ADMIN_ROLE");
+    bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
     // ─── Risk Parameters ───────────────────────────────────────────────
     uint256 internal constant CONFIDENCE_BPS = 9900;
@@ -113,9 +114,12 @@ contract Deploy is ClearRateScript {
         console.log("\n[7/7] Deploying LiquidationEngine...");
         LiquidationEngine liquidationEngine = new LiquidationEngine(
             deployer,
+            getChainlinkForwarder(),
+            address(clearingHouse),
             address(riskEngine),
             address(marginVault),
             address(insuranceFund),
+            address(whitelist),
             AUCTION_DURATION,
             START_PREMIUM_BPS
         );
@@ -129,9 +133,15 @@ contract Deploy is ClearRateScript {
         console.log("Configuring Roles & Permissions...");
         console.log("========================================\n");
 
-        // Grant ClearingHouse roles to MarginVault
+        // Grant roles to ClearingHouse
+        clearingHouse.grantRole(LIQUIDATION_ENGINE_ROLE, address(liquidationEngine));
+        console.log("- Granted LIQUIDATION_ENGINE_ROLE to LiquidationEngine on ClearingHouse");
+
+        // Grant roles to MarginVault
         marginVault.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on MarginVault");
+        marginVault.grantRole(LIQUIDATION_ENGINE_ROLE, address(liquidationEngine));
+        console.log("- Granted LIQUIDATION_ENGINE_ROLE to liquidationEngine on MarginVault");
 
         // Grant roles to IRSInstrument
         instrument.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
@@ -170,23 +180,31 @@ contract Deploy is ClearRateScript {
 
         string[] memory names = new string[](7);
         address[] memory addrs = new address[](7);
+        string[] memory envVars = new string[](7);
 
-        names[0] = "Whitelist";
+        names[0] = "# Whitelist";
         addrs[0] = address(whitelist);
-        names[1] = "MarginVault";
+        envVars[0] = "WHITELIST_ADDRESS";
+        names[1] = "# Margin Vault";
         addrs[1] = address(marginVault);
-        names[2] = "RiskEngine";
+        envVars[1] = "MARGIN_VAULT_ADDRESS";
+        names[2] = "# Risk Engine";
         addrs[2] = address(riskEngine);
-        names[3] = "IRSInstrument";
+        envVars[2] = "RISK_ENGINE_ADDRESS";
+        names[3] = "# IRS Instrument";
         addrs[3] = address(instrument);
-        names[4] = "ClearingHouse";
+        envVars[3] = "IRS_INSTRUMENT_ADDRESS";
+        names[4] = "# Clearing House";
         addrs[4] = address(clearingHouse);
-        names[5] = "InsuranceFund";
+        envVars[4] = "CLEARING_HOUSE_ADDRESS";
+        names[5] = "# Insurance Fund";
         addrs[5] = address(insuranceFund);
-        names[6] = "LiquidationEngine";
+        envVars[5] = "INSURANCE_FUND_ADDRESS";
+        names[6] = "# Liquidation Engine";
         addrs[6] = address(liquidationEngine);
+        envVars[6] = "LIQUIDATION_ENGINE_ADDRESS";
 
-        logAllDeployments(names, addrs);
+        logAllDeployments(names, addrs, envVars);
 
         console.log("Protocol deployment complete!");
     }

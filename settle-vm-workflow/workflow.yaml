@@ -13,6 +13,14 @@ staging-settings:
     config-path: "./config.staging.json"
     secrets-path: "../secrets.yaml"
 
+final-staging-settings:
+  user-workflow:
+    workflow-name: "settle-vm-workflow"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./final-config.staging.json"
+    secrets-path: "../secrets.yaml"
+
 # ==========================================================================
 production-settings:
   user-workflow:

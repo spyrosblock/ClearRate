@@ -16517,41 +16517,20 @@ var configSchema = exports_external.object({
     clearingHouseAddress: exports_external.string(),
     marginVaultAddress: exports_external.string(),
     riskEngineAddress: exports_external.string(),
+    liquidationEngineAddress: exports_external.string(),
     chainSelectorName: exports_external.string(),
     gasLimit: exports_external.string()
   })),
-  dbApi: exports_external.object({
+  novatedPositionsApi: exports_external.object({
     url: exports_external.string()
   }),
   liquidationMonitoringApi: exports_external.object({
     url: exports_external.string()
+  }),
+  absorbPositionsApi: exports_external.object({
+    url: exports_external.string()
   })
 });
-var eventAbi = parseAbi([
-  "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
-  "event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)",
-  "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
-  "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
-  "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)"
-]);
-var postToDatabase = (sendRequester, config, payload) => {
-  const dataToSend = { ...payload };
-  const bodyBytes = new TextEncoder().encode(JSON.stringify(dataToSend));
-  const body = Buffer.from(bodyBytes).toString("base64");
-  const req = {
-    url: config.dbApi.url,
-    method: "POST",
-    body,
-    headers: {
-      "Content-Type": "application/json"
-    }
-  };
-  const resp = sendRequester.sendRequest(req).result();
-  if (!ok(resp)) {
-    throw new Error(`HTTP request failed with status: ${resp.statusCode}`);
-  }
-  return { statusCode: resp.statusCode };
-};
 var getFromApi = (sendRequester, url) => {
   const req = {
     url,
@@ -16587,7 +16566,196 @@ var postToApi = (sendRequester, url, payload) => {
   }
   return { statusCode: resp.statusCode };
 };
-var onLogTrigger = (runtime2, log) => {
+var handleTradeNovated = (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event TradeNovated detected: tradeId ${typedArgs.tradeId} | tokenIdA ${typedArgs.tokenIdA} | tokenIdB ${typedArgs.tokenIdB} | partyA ${typedArgs.partyA} | partyB ${typedArgs.partyB} | collateralToken ${typedArgs.collateralToken}`);
+  const payload = {
+    action: "TradeNovated",
+    tradeId: typedArgs.tradeId,
+    tokenIdA: typedArgs.tokenIdA.toString(),
+    tokenIdB: typedArgs.tokenIdB.toString(),
+    partyA: typedArgs.partyA,
+    partyB: typedArgs.partyB,
+    notional: typedArgs.notional.toString(),
+    fixedRateBps: typedArgs.fixedRateBps.toString(),
+    startDate: typedArgs.startDate.toString(),
+    maturityDate: typedArgs.maturityDate.toString(),
+    active: true,
+    lastNpv: "0",
+    collateralToken: typedArgs.collateralToken
+  };
+  runtime2.log(`Storing novated position: ${JSON.stringify(payload)}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.novatedPositionsApi.url, payload), consensusIdenticalAggregation())(config).result();
+  runtime2.log(`Successfully stored novated trade. Status: ${result.statusCode}`);
+  return { success: true, message: `Stored novated trade ${typedArgs.tradeId}` };
+};
+var handlePositionMatured = (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event PositionMatured detected: tradeId ${typedArgs.tradeId} | timestamp ${typedArgs.timestamp}`);
+  const payload = {
+    action: "PositionMatured",
+    tradeId: typedArgs.tradeId
+  };
+  runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.novatedPositionsApi.url, payload), consensusIdenticalAggregation())(config).result();
+  runtime2.log(`Successfully updated position to inactive. Status: ${result.statusCode}`);
+  return { success: true, message: `Updated position ${typedArgs.tradeId} to inactive` };
+};
+var handleMarginDeposited = (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event MarginDeposited detected: accountId ${typedArgs.accountId} | token ${typedArgs.token} | amount ${typedArgs.amount}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const getUrl = `${config.liquidationMonitoringApi.url}?accountId=${typedArgs.accountId}&collateralToken=${typedArgs.token}`;
+  const existingRecordResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => getFromApi(sendRequester, getUrl), consensusIdenticalAggregation())(config).result();
+  if (existingRecordResult.statusCode === 404) {
+    runtime2.log(`Creating new liquidation monitoring record for accountId ${typedArgs.accountId}`);
+    const createUrl = `${config.liquidationMonitoringApi.url}/create-record`;
+    const createResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, createUrl, {
+      accountId: typedArgs.accountId,
+      totalCollateral: typedArgs.amount.toString(),
+      maintenanceMargin: "0",
+      collateralToken: typedArgs.token
+    }), consensusIdenticalAggregation())(config).result();
+    runtime2.log(`Successfully created liquidation monitoring record. Status: ${createResult.statusCode}`);
+    return { success: true, message: `Created new record for account ${typedArgs.accountId}` };
+  }
+  const recordResponse = JSON.parse(existingRecordResult.body);
+  if (recordResponse.success && recordResponse.record) {
+    const currentCollateral = BigInt(recordResponse.record.totalCollateral);
+    const newCollateral = currentCollateral + typedArgs.amount;
+    runtime2.log(`Updating existing record: currentCollateral ${currentCollateral} -> newCollateral ${newCollateral}`);
+    const updateUrl = `${config.liquidationMonitoringApi.url}/update-total-collateral`;
+    const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, updateUrl, {
+      accountId: typedArgs.accountId,
+      totalCollateral: newCollateral.toString(),
+      collateralToken: typedArgs.token
+    }), consensusIdenticalAggregation())(config).result();
+    runtime2.log(`Successfully updated total collateral. Status: ${updateResult.statusCode}`);
+    return { success: true, message: `Updated collateral for account ${typedArgs.accountId}` };
+  }
+  runtime2.log(`Warning: Failed to get record for account ${typedArgs.accountId} - response: ${existingRecordResult.body}`);
+  return { success: false, message: `Failed to get record for account ${typedArgs.accountId}` };
+};
+var handleMarginWithdrawn = (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event MarginWithdrawn detected: accountId ${typedArgs.accountId} | token ${typedArgs.token} | amount ${typedArgs.amount}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const getUrl = `${config.liquidationMonitoringApi.url}?accountId=${typedArgs.accountId}&collateralToken=${typedArgs.token}`;
+  const existingRecordResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => getFromApi(sendRequester, getUrl), consensusIdenticalAggregation())(config).result();
+  if (existingRecordResult.statusCode === 404) {
+    runtime2.log(`Warning: MarginWithdrawn event for non-existent account ${typedArgs.accountId} - skipping`);
+    return { success: false, message: `Account ${typedArgs.accountId} does not exist` };
+  }
+  const recordResponse = JSON.parse(existingRecordResult.body);
+  if (recordResponse.success && recordResponse.record) {
+    const currentCollateral = BigInt(recordResponse.record.totalCollateral);
+    let newCollateral;
+    if (typedArgs.amount > currentCollateral) {
+      newCollateral = BigInt(0);
+    } else {
+      newCollateral = currentCollateral - typedArgs.amount;
+    }
+    runtime2.log(`Updating existing record: currentCollateral ${currentCollateral} -> newCollateral ${newCollateral}`);
+    const updateUrl = `${config.liquidationMonitoringApi.url}/update-total-collateral`;
+    const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, updateUrl, {
+      accountId: typedArgs.accountId,
+      totalCollateral: newCollateral.toString(),
+      collateralToken: typedArgs.token
+    }), consensusIdenticalAggregation())(config).result();
+    runtime2.log(`Successfully updated total collateral. Status: ${updateResult.statusCode}`);
+    return { success: true, message: `Updated collateral for account ${typedArgs.accountId}` };
+  }
+  runtime2.log(`Warning: Failed to get record for account ${typedArgs.accountId} - response: ${existingRecordResult.body}`);
+  return { success: false, message: `Failed to get record for account ${typedArgs.accountId}` };
+};
+var handleAccountMMUpdated = (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event AccountMMUpdated detected: accountId ${typedArgs.accountId} | collateralToken ${typedArgs.collateralToken} | oldMM ${typedArgs.oldMM} | newMM ${typedArgs.newMM}`);
+  const updateUrl = `${config.liquidationMonitoringApi.url}/update-maintenance-margin`;
+  const httpClient = new cre.capabilities.HTTPClient;
+  const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, updateUrl, {
+    accountId: typedArgs.accountId,
+    maintenanceMargin: typedArgs.newMM.toString(),
+    collateralToken: typedArgs.collateralToken
+  }), consensusIdenticalAggregation())(config).result();
+  runtime2.log(`Successfully updated maintenance margin. Status: ${updateResult.statusCode}`);
+  return { success: true, message: `Updated maintenance margin for account ${typedArgs.accountId}` };
+};
+var handlePositionsAbsorbed = async (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event PositionsAbsorbed detected: accountId ${typedArgs.accountId} | collateralToken ${typedArgs.collateralToken} | liquidatorId ${typedArgs.liquidatorId} | premium ${typedArgs.premium}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const absorbPositionsUrl = config.absorbPositionsApi.url;
+  runtime2.log(`Calling absorb-positions API at: ${absorbPositionsUrl}`);
+  const result = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, absorbPositionsUrl, {
+    liquidatedId: typedArgs.accountId,
+    collateralToken: typedArgs.collateralToken,
+    liquidatorId: typedArgs.liquidatorId,
+    premium: typedArgs.premium.toString()
+  }), consensusIdenticalAggregation())(config).result();
+  runtime2.log(`Absorb-positions API response status: ${result.statusCode}`);
+  if (result.statusCode >= 200 && result.statusCode < 300) {
+    return { success: true, message: `Successfully processed PositionsAbsorbed for account ${typedArgs.accountId}` };
+  } else {
+    return { success: false, message: `Failed to process PositionsAbsorbed - API returned status ${result.statusCode}` };
+  }
+};
+var handlerRegistry = {
+  TradeNovated: {
+    handler: handleTradeNovated,
+    description: "Handles trade novation events from ClearingHouse"
+  },
+  PositionMatured: {
+    handler: handlePositionMatured,
+    description: "Handles position maturity events from ClearingHouse"
+  },
+  MarginDeposited: {
+    handler: handleMarginDeposited,
+    description: "Handles margin deposit events from MarginVault"
+  },
+  MarginWithdrawn: {
+    handler: handleMarginWithdrawn,
+    description: "Handles margin withdrawal events from MarginVault"
+  },
+  AccountMMUpdated: {
+    handler: handleAccountMMUpdated,
+    description: "Handles maintenance margin update events from RiskEngine"
+  },
+  PositionsAbsorbed: {
+    handler: handlePositionsAbsorbed,
+    description: "Handles position absorption events from LiquidationEngine"
+  }
+};
+var getHandler = (eventName) => {
+  return handlerRegistry[eventName];
+};
+var isRegisteredEvent = (eventName) => {
+  return eventName in handlerRegistry;
+};
+var executeHandler = async (eventName, context) => {
+  const entry = getHandler(eventName);
+  if (!entry) {
+    return { success: false, message: `No handler registered for event: ${eventName}` };
+  }
+  return entry.handler(context);
+};
+var eventAbi = parseAbi([
+  "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
+  "event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)",
+  "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
+  "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
+  "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)",
+  "event PositionsAbsorbed(bytes32 indexed accountId, address indexed collateralToken, bytes32 indexed liquidatorId, uint256 premium)"
+]);
+var onLogTrigger = async (runtime2, log) => {
   runtime2.log("=== Store Logs Workflow: New Event Detected ===");
   const topics = log.topics.map((topic) => bytesToHex(topic));
   const data = bytesToHex(log.data);
@@ -16600,102 +16768,18 @@ var onLogTrigger = (runtime2, log) => {
   });
   const eventName = decodedLog.eventName;
   runtime2.log(`Event name: ${eventName}`);
-  const httpClient = new cre.capabilities.HTTPClient;
-  if (eventName === "TradeNovated") {
-    const args = decodedLog.args;
-    const { tradeId, tokenIdA, tokenIdB, partyA, partyB, notional, fixedRateBps, startDate, maturityDate, collateralToken } = args;
-    runtime2.log(`Event TradeNovated detected: tradeId ${tradeId} | tokenIdA ${tokenIdA} | tokenIdB ${tokenIdB} | partyA ${partyA} | partyB ${partyB} | collateralToken ${collateralToken}`);
-    const payload = {
-      action: "TradeNovated",
-      tradeId,
-      tokenIdA: tokenIdA.toString(),
-      tokenIdB: tokenIdB.toString(),
-      partyA,
-      partyB,
-      notional: notional.toString(),
-      fixedRateBps: fixedRateBps.toString(),
-      startDate: startDate.toString(),
-      maturityDate: maturityDate.toString(),
-      active: true,
-      lastNpv: "0",
-      collateralToken
-    };
-    runtime2.log(`Storing novated position: ${JSON.stringify(payload)}`);
-    const result = httpClient.sendRequest(runtime2, (sendRequester, config) => postToDatabase(sendRequester, config, payload), consensusIdenticalAggregation())(runtime2.config).result();
-    runtime2.log(`Successfully stored novated trade. Status: ${result.statusCode}`);
-  } else if (eventName === "PositionMatured") {
-    const args = decodedLog.args;
-    const { tradeId, timestamp } = args;
-    runtime2.log(`Event PositionMatured detected: tradeId ${tradeId} | timestamp ${timestamp}`);
-    const payload = {
-      action: "PositionMatured",
-      tradeId
-    };
-    runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
-    const result = httpClient.sendRequest(runtime2, (sendRequester, config) => postToDatabase(sendRequester, config, payload), consensusIdenticalAggregation())(runtime2.config).result();
-    runtime2.log(`Successfully updated position to inactive. Status: ${result.statusCode}`);
-  } else if (eventName === "MarginDeposited" || eventName === "MarginWithdrawn") {
-    const args = decodedLog.args;
-    const { accountId, token, amount } = args;
-    runtime2.log(`Event ${eventName} detected: accountId ${accountId} | token ${token} | amount ${amount}`);
-    const getUrl = `${runtime2.config.liquidationMonitoringApi.url}?accountId=${accountId}&collateralToken=${token}`;
-    const existingRecordResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => getFromApi(sendRequester, getUrl), consensusIdenticalAggregation())(runtime2.config).result();
-    if (existingRecordResult.statusCode === 404) {
-      if (eventName === "MarginDeposited") {
-        runtime2.log(`Creating new liquidation monitoring record for accountId ${accountId}`);
-        const createUrl = `${runtime2.config.liquidationMonitoringApi.url}/create-record`;
-        const createResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, createUrl, {
-          accountId,
-          totalCollateral: amount.toString(),
-          maintenanceMargin: "0",
-          collateralToken: token
-        }), consensusIdenticalAggregation())(runtime2.config).result();
-        runtime2.log(`Successfully created liquidation monitoring record. Status: ${createResult.statusCode}`);
-      } else {
-        runtime2.log(`Warning: MarginWithdrawn event for non-existent account ${accountId} - skipping`);
-      }
-    } else {
-      const recordResponse = JSON.parse(existingRecordResult.body);
-      if (recordResponse.success && recordResponse.record) {
-        const currentCollateral = BigInt(recordResponse.record.totalCollateral);
-        let newCollateral;
-        if (eventName === "MarginDeposited") {
-          newCollateral = currentCollateral + amount;
-        } else {
-          if (amount > currentCollateral) {
-            newCollateral = BigInt(0);
-          } else {
-            newCollateral = currentCollateral - amount;
-          }
-        }
-        runtime2.log(`Updating existing record: currentCollateral ${currentCollateral} -> newCollateral ${newCollateral}`);
-        const updateUrl = `${runtime2.config.liquidationMonitoringApi.url}/update-total-collateral`;
-        const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, updateUrl, {
-          accountId,
-          totalCollateral: newCollateral.toString(),
-          collateralToken: token
-        }), consensusIdenticalAggregation())(runtime2.config).result();
-        runtime2.log(`Successfully updated total collateral. Status: ${updateResult.statusCode}`);
-      } else {
-        runtime2.log(`Warning: Failed to get record for account ${accountId} - response: ${existingRecordResult.body}`);
-      }
-    }
-  } else if (eventName === "AccountMMUpdated") {
-    const args = decodedLog.args;
-    const { accountId, collateralToken, oldMM, newMM } = args;
-    runtime2.log(`Event AccountMMUpdated detected: accountId ${accountId} | collateralToken ${collateralToken} | oldMM ${oldMM} | newMM ${newMM}`);
-    const updateUrl = `${runtime2.config.liquidationMonitoringApi.url}/update-maintenance-margin`;
-    const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _config) => postToApi(sendRequester, updateUrl, {
-      accountId,
-      maintenanceMargin: newMM.toString(),
-      collateralToken
-    }), consensusIdenticalAggregation())(runtime2.config).result();
-    runtime2.log(`Successfully updated maintenance margin. Status: ${updateResult.statusCode}`);
-  } else {
+  if (!isRegisteredEvent(eventName)) {
     runtime2.log(`Unknown event: ${eventName}`);
     return "Unknown event";
   }
-  return "Success";
+  const context = {
+    runtime: runtime2,
+    args: decodedLog.args,
+    config: runtime2.config
+  };
+  const result = await executeHandler(eventName, context);
+  runtime2.log(`Handler result: ${result.message}`);
+  return result.success ? "Success" : `Failed: ${result.message}`;
 };
 var initWorkflow = (config) => {
   const network248 = getNetwork({
@@ -16712,7 +16796,8 @@ var initWorkflow = (config) => {
       addresses: [
         hexToBase64(config.evms[0].clearingHouseAddress),
         hexToBase64(config.evms[0].marginVaultAddress),
-        hexToBase64(config.evms[0].riskEngineAddress)
+        hexToBase64(config.evms[0].riskEngineAddress),
+        hexToBase64(config.evms[0].liquidationEngineAddress)
       ]
     }), onLogTrigger)
   ];

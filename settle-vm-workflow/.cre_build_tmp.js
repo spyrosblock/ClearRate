@@ -15834,7 +15834,8 @@ var configSchema = exports_external.object({
   }).optional(),
   updateTotalCollateral: exports_external.object({
     apiEndpoint: exports_external.string()
-  }).optional()
+  }).optional(),
+  isFinal: exports_external.boolean().optional()
 });
 var vmSettlementPayloadSchema = exports_external.object({
   settlements: exports_external.array(exports_external.object({
@@ -16029,7 +16030,9 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
     throw new Error(`Network not found for chain: ${evmConfig.chainSelectorName}`);
   }
   const evmClient = new ClientCapability(network248.chainSelector.selector);
-  payload.settlements.forEach((s) => s.isFinal = true);
+  if (runtime2.config.isFinal)
+    payload.settlements.forEach((s) => s.isFinal = true);
+  runtime2.log(`Config: isFinal=${runtime2.config.isFinal}`);
   const vmSettlements = payload.settlements.filter((s) => !s.isFinal);
   const maturedSettlements = payload.settlements.filter((s) => s.isFinal);
   runtime2.log(`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`);

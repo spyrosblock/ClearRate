@@ -55,7 +55,7 @@ function generateCompanyInfo(userNumber) {
         bic: "COBADEFFXXX"
       }
     };
-  } else {
+  } else if (userNumber === 2) {
     return {
       companyName: "Jane Johnson",
       registrationNumber: "JJ123456789",
@@ -71,6 +71,25 @@ function generateCompanyInfo(userNumber) {
       bankDetails: {
         iban: "CA3412345678901234567890123",
         bic: "BOFMCAM2XXX"
+      }
+    };
+  } else {
+    // User 3
+    return {
+      companyName: "Global Finance Partners",
+      registrationNumber: "GFP987654321",
+      registeredCountry: "GB",
+      contactEmail: "info@globalfinancepartners.co.uk",
+      lei: "549300ABCDEFGH123456",
+      website: "https://www.globalfinancepartners.co.uk",
+      uploadedLegalDocs: {
+        articlesOfAssociation: "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/articles_of_association.pdf",
+        certificateOfIncorporation: "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/certificate_of_incorporation.pdf",
+        vatCertificate: "https://gfp-my.sharepoint.com/:b:/g/personal/documents_globalfinancepartners_co_uk/EQ987654321abcdef/vat_certificate.pdf"
+      },
+      bankDetails: {
+        iban: "GB29NWBK60161331926819",
+        bic: "NWBKGB2LXXX"
       }
     };
   }
@@ -100,6 +119,11 @@ async function main() {
       number: 2,
       address: env.USER2_ADDRESS,
       privateKey: env.USER2_PRIVATE_KEY
+    },
+    {
+      number: 3,
+      address: env.USER3_ADDRESS,
+      privateKey: env.USER3_PRIVATE_KEY
     }
   ];
   
@@ -109,7 +133,7 @@ async function main() {
   );
   
   if (validUsers.length === 0) {
-    console.error("No valid users found in .env file. Please ensure USER1 and/or USER2 configuration is complete.");
+    console.error("No valid users found in .env file. Please ensure USER1, USER2, and/or USER3 configuration is complete.");
     process.exit(1);
   }
   

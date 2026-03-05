@@ -252,25 +252,25 @@ contract ClearingHouseTest is Test {
     }
 
     function test_submitMatchedTrade_locksInitialMargin() public {
-        uint256 aliceFreeBefore = marginVault.getFreeMargin(ALICE_ACCOUNT);
-        uint256 bobFreeBefore = marginVault.getFreeMargin(BOB_ACCOUNT);
+        uint256 aliceFreeBefore = marginVault.getFreeMarginByToken(ALICE_ACCOUNT, address(usdc));
+        uint256 bobFreeBefore = marginVault.getFreeMarginByToken(BOB_ACCOUNT, address(usdc));
 
         bytes32 tradeId = keccak256("TRADE_1");
         _submitDefaultTrade(tradeId);
 
         uint256 im = _expectedIM();
-        assertEq(marginVault.getFreeMargin(ALICE_ACCOUNT), aliceFreeBefore - im);
-        assertEq(marginVault.getFreeMargin(BOB_ACCOUNT), bobFreeBefore - im);
-        assertEq(marginVault.getLockedIM(ALICE_ACCOUNT), im);
-        assertEq(marginVault.getLockedIM(BOB_ACCOUNT), im);
+        assertEq(marginVault.getFreeMarginByToken(ALICE_ACCOUNT, address(usdc)), aliceFreeBefore - im);
+        assertEq(marginVault.getFreeMarginByToken(BOB_ACCOUNT, address(usdc)), bobFreeBefore - im);
+        assertEq(marginVault.getLockedIMByToken(ALICE_ACCOUNT, address(usdc)), im);
+        assertEq(marginVault.getLockedIMByToken(BOB_ACCOUNT, address(usdc)), im);
     }
 
     function test_submitMatchedTrade_tracksAccountPositions() public {
         bytes32 tradeId = keccak256("TRADE_1");
         _submitDefaultTrade(tradeId);
 
-        bytes32[] memory alicePos = clearingHouse.getAccountPositions(ALICE_ACCOUNT);
-        bytes32[] memory bobPos = clearingHouse.getAccountPositions(BOB_ACCOUNT);
+        bytes32[] memory alicePos = clearingHouse.getAccountPositions(ALICE_ACCOUNT, address(usdc));
+        bytes32[] memory bobPos = clearingHouse.getAccountPositions(BOB_ACCOUNT, address(usdc));
         assertEq(alicePos.length, 1);
         assertEq(alicePos[0], tradeId);
         assertEq(bobPos.length, 1);
@@ -300,7 +300,7 @@ contract ClearingHouseTest is Test {
         clearingHouse.onReport("", report2);
 
         assertEq(clearingHouse.activePositionCount(), 2);
-        assertEq(clearingHouse.getAccountPositions(ALICE_ACCOUNT).length, 2);
+        assertEq(clearingHouse.getAccountPositions(ALICE_ACCOUNT, address(usdc)).length, 2);
     }
 
     function test_submitMatchedTrade_emitsTradeSubmitted() public {
@@ -325,8 +325,8 @@ contract ClearingHouseTest is Test {
         bytes32 tradeId = keccak256("TRADE_1");
         _submitDefaultTrade(tradeId);
 
-        uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
-        uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
+        uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc));
 
         int256 npvChange = 5_000e6;
 
@@ -341,8 +341,8 @@ contract ClearingHouseTest is Test {
         vm.prank(forwarder);
         clearingHouse.onReport("", report);
 
-        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceBefore + uint256(npvChange));
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobBefore - uint256(npvChange));
+        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc)), aliceBefore + uint256(npvChange));
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc)), bobBefore - uint256(npvChange));
 
         IClearingHouse.NovatedPosition memory pos = clearingHouse.getPosition(tradeId);
         assertEq(pos.lastNpv, npvChange);
@@ -352,8 +352,8 @@ contract ClearingHouseTest is Test {
         bytes32 tradeId = keccak256("TRADE_1");
         _submitDefaultTrade(tradeId);
 
-        uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT);
-        uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT);
+        uint256 aliceBefore = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
+        uint256 bobBefore = marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc));
 
         int256 npvChange = -5_000e6;
 
@@ -365,8 +365,8 @@ contract ClearingHouseTest is Test {
         vm.prank(forwarder);
         clearingHouse.onReport("", report);
 
-        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT), aliceBefore - 5_000e6);
-        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT), bobBefore + 5_000e6);
+        assertEq(marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc)), aliceBefore - 5_000e6);
+        assertEq(marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc)), bobBefore + 5_000e6);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════

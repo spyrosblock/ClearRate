@@ -1,17 +1,21 @@
 {
   "evms": [
     {
-      "clearingHouseAddress": "0xbA4f1825CA34AE68035Fbb615273e6406e7F3271",
+      "clearingHouseAddress": "",
       "marginVaultAddress": "",
       "riskEngineAddress": "",
+      "liquidationEngineAddress": "",
       "chainSelectorName": "ethereum-mainnet",
       "gasLimit": "2000000"
     }
   ],
-  "dbApi": {
+  "novatedPositionsApi": {
     "url": ""
   },
   "liquidationMonitoringApi": {
+    "url": ""
+  },
+  "absorbPositionsApi": {
     "url": ""
   }
 }

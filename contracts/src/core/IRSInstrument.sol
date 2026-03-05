@@ -121,6 +121,22 @@ contract IRSInstrument is ERC1155, AccessControl {
         emit SwapPositionBurned(tokenId, from, amount);
     }
 
+    /// @notice Transfer a position token from one address to another (called during liquidation).
+    /// @dev Called by ClearingHouse during transferPositions to maintain token holder = position owner invariant.
+    /// @param from The address currently holding the position token.
+    /// @param to The address to receive the position token.
+    /// @param tokenId The token ID to transfer.
+    /// @param amount The amount (notional) to transfer.
+    function transferPosition(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 amount
+    ) external onlyRole(CLEARING_HOUSE_ROLE) {
+        if (!tokenExists[tokenId]) revert TokenDoesNotExist(tokenId);
+        _safeTransferFrom(from, to, tokenId, amount, "");
+    }
+
     // ─── View Functions ─────────────────────────────────────────────────
 
     /// @notice Get the full swap terms for a token ID.

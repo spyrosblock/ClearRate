@@ -6,13 +6,11 @@ import {MarginVault} from "../src/margin/MarginVault.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title MintAndDepositMargin
-/// @notice Script to deposit 4 million tokens each for 2 users on the MarginVault.
-/// @dev Run with: forge script script/MintAndDepositMargin.s.sol:MintAndDepositMargin --rpc-url sepolia --broadcast --verify
+/// @notice Script to deposit 4 million tokens each for 3 users on the MarginVault.
 ///
 /// This script reads from environment variables:
-/// - USER1_ADDRESS / USER2_ADDRESS: User wallet addresses
-/// - USER1_ACCOUNT_ID / USER2_ACCOUNT_ID: Account IDs for margin accounts
-/// - USER1_PRIVATE_KEY / USER2_PRIVATE_KEY: Private keys for signing transactions
+/// - USER1_ADDRESS / USER2_ADDRESS / USER3_ADDRESS: User wallet addresses
+/// - USER1_PRIVATE_KEY / USER2_PRIVATE_KEY / USER3_PRIVATE_KEY: Private keys for signing transactions
 /// - MARGIN_VAULT_ADDRESS: Address of the MarginVault contract
 /// - MOCK_COLLATERAL_TOKEN: Address of the collateral token (USDC)
 contract MintAndDepositMargin is Script {
@@ -29,10 +27,13 @@ contract MintAndDepositMargin is Script {
 
     address internal user1Address;
     address internal user2Address;
+    address internal user3Address;
     bytes32 internal accountId1;
     bytes32 internal accountId2;
+    bytes32 internal accountId3;
     uint256 internal user1PrivateKey;
     uint256 internal user2PrivateKey;
+    uint256 internal user3PrivateKey;
     address internal marginVaultAddress;
     address internal collateralToken;
 
@@ -57,18 +58,23 @@ contract MintAndDepositMargin is Script {
         // Load user addresses
         string memory user1AddrStr = vm.envString("USER1_ADDRESS");
         string memory user2AddrStr = vm.envString("USER2_ADDRESS");
+        string memory user3AddrStr = vm.envString("USER3_ADDRESS");
         user1Address = _parseAddress(user1AddrStr);
         user2Address = _parseAddress(user2AddrStr);
+        user3Address = _parseAddress(user3AddrStr);
 
         // Load account IDs
         accountId1 = _addressToAccountId(user1Address);
         accountId2 = _addressToAccountId(user2Address);
+        accountId3 = _addressToAccountId(user3Address);
 
         // Load private keys
         string memory user1KeyStr = vm.envString("USER1_PRIVATE_KEY");
         string memory user2KeyStr = vm.envString("USER2_PRIVATE_KEY");
+        string memory user3KeyStr = vm.envString("USER3_PRIVATE_KEY");
         user1PrivateKey = _parseHexPrivateKey(user1KeyStr);
         user2PrivateKey = _parseHexPrivateKey(user2KeyStr);
+        user3PrivateKey = _parseHexPrivateKey(user3KeyStr);
 
         console.log("========================================");
         console.log("Depositing Margin on ClearRate Protocol");
@@ -112,6 +118,12 @@ contract MintAndDepositMargin is Script {
         console.log("Minted to User 2:");
         console.logUint(DEPOSIT_AMOUNT);
         
+        // Mint to user 3
+        (bool success3, ) = tokenAddr.call(abi.encodeWithSignature("mint(address,uint256)", user3Address, DEPOSIT_AMOUNT));
+        require(success3, "Failed to mint tokens to user 3");
+        console.log("Minted to User 3:");
+        console.logUint(DEPOSIT_AMOUNT);
+        
         vm.stopBroadcast();
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -128,11 +140,18 @@ contract MintAndDepositMargin is Script {
         console.log("User 2 Token Balance:");
         console.logUint(user2Balance);
 
+        uint256 user3Balance = token.balanceOf(user3Address);
+        console.log("User 3 Token Balance:");
+        console.logUint(user3Balance);
+
         if (user1Balance < DEPOSIT_AMOUNT) {
             console.log("WARNING: User 1 has insufficient balance!");
         }
         if (user2Balance < DEPOSIT_AMOUNT) {
             console.log("WARNING: User 2 has insufficient balance!");
+        }
+        if (user3Balance < DEPOSIT_AMOUNT) {
+            console.log("WARNING: User 3 has insufficient balance!");
         }
 
         // Check and show current margin balances
@@ -146,11 +165,15 @@ contract MintAndDepositMargin is Script {
         console.log("User 2 Current Total Collateral:");
         console.logUint(user2CurrentCollateral);
 
+        uint256 user3CurrentCollateral = marginVault.getTotalCollateral(accountId3, collateralToken);
+        console.log("User 3 Current Total Collateral:");
+        console.logUint(user3CurrentCollateral);
+
         // ═══════════════════════════════════════════════════════════════════════
         //  DEPOSIT FOR USER 1
         // ═══════════════════════════════════════════════════════════════════════
 
-        console.log("\n[1/2] Depositing margin for User 1...");
+        console.log("\n[1/3] Depositing margin for User 1...");
         console.log("  Address:");
         console.logAddress(user1Address);
         console.log("  AccountId:");
@@ -174,7 +197,7 @@ contract MintAndDepositMargin is Script {
         //  DEPOSIT FOR USER 2
         // ═══════════════════════════════════════════════════════════════════════
 
-        console.log("\n[2/2] Depositing margin for User 2...");
+        console.log("\n[2/3] Depositing margin for User 2...");
         console.log("  Address:");
         console.logAddress(user2Address);
         console.log("  AccountId:");
@@ -195,6 +218,30 @@ contract MintAndDepositMargin is Script {
         console.log("  [OK] User 2 margin deposited successfully");
 
         // ═══════════════════════════════════════════════════════════════════════
+        //  DEPOSIT FOR USER 3
+        // ═══════════════════════════════════════════════════════════════════════
+
+        console.log("\n[3/3] Depositing margin for User 3...");
+        console.log("  Address:");
+        console.logAddress(user3Address);
+        console.log("  AccountId:");
+        console.logBytes32(accountId3);
+        console.log("  Amount:");
+        console.logUint(DEPOSIT_AMOUNT);
+
+        vm.startBroadcast(user3PrivateKey);
+
+        // Approve tokens for MarginVault
+        token.approve(marginVaultAddress, DEPOSIT_AMOUNT);
+
+        // Deposit margin
+        marginVault.depositMargin(accountId3, collateralToken, DEPOSIT_AMOUNT);
+        
+        vm.stopBroadcast();
+
+        console.log("  [OK] User 3 margin deposited successfully");
+
+        // ═══════════════════════════════════════════════════════════════════════
         //  VERIFY DEPOSITS
         // ═══════════════════════════════════════════════════════════════════════
 
@@ -209,6 +256,10 @@ contract MintAndDepositMargin is Script {
         uint256 user2NewCollateral = marginVault.getTotalCollateral(accountId2, collateralToken);
         console.log("User 2 New Total Collateral:");
         console.logUint(user2NewCollateral);
+
+        uint256 user3NewCollateral = marginVault.getTotalCollateral(accountId3, collateralToken);
+        console.log("User 3 New Total Collateral:");
+        console.logUint(user3NewCollateral);
 
         console.log("\n========================================");
         console.log("Margin deposit complete!");

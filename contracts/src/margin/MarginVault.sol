@@ -18,6 +18,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
 
     // ─── Roles ──────────────────────────────────────────────────────────
     bytes32 public constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
+    bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
     // ─── State ──────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
     error ZeroAmount();
     error InvalidAddress();
     error NotAuthorized(address caller, bytes32 accountId);
+    error UnauthorizedForVMSettlement(address account, bytes32 neededRole1, bytes32 neededRole2);
     error WhitelistNotSet();
 
     // ─── Constructor ────────────────────────────────────────────────────
@@ -195,6 +197,7 @@ contract MarginVault is AccessControl, ReentrancyGuard {
 
     /// @notice Settle variation margin for an account with a specific token.
     /// @dev Positive amount = credit (account gains), negative = debit (account loses).
+    ///      Only ClearingHouse or LiquidationEngine can settle variation margin.
     /// @param accountId The account identifier.
     /// @param token The collateral token for VM settlement.
     /// @param amount Signed variation margin amount.
@@ -202,7 +205,10 @@ contract MarginVault is AccessControl, ReentrancyGuard {
         bytes32 accountId,
         address token,
         int256 amount
-    ) external onlyRole(CLEARING_HOUSE_ROLE) {
+    ) external {
+        if (!hasRole(CLEARING_HOUSE_ROLE, msg.sender) && !hasRole(LIQUIDATION_ENGINE_ROLE, msg.sender)) {
+            revert UnauthorizedForVMSettlement(msg.sender, CLEARING_HOUSE_ROLE, LIQUIDATION_ENGINE_ROLE);
+        }
         if (!acceptedTokens[token]) revert TokenNotAccepted(token);
 
         if (!marginAccountExists[accountId]) revert AccountNotInitialized(accountId);

@@ -22,6 +22,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     // ─── Constants ──────────────────────────────────────────────────────
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     bytes32 public constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
+    bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
     /// @dev EIP-712 typehash for MatchedTrade struct.
     bytes32 public constant MATCHED_TRADE_TYPEHASH = keccak256(
@@ -40,7 +41,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     mapping(bytes32 => NovatedPosition) public positions;
 
     /// @notice Active position tradeIds for an account.
-    mapping(bytes32 => bytes32[]) public accountPositions;
+    mapping(bytes32 => mapping(address => bytes32[])) public accountPositions;
 
     /// @notice Used nonces per account for replay protection.
     mapping(bytes32 => mapping(uint256 => bool)) public usedNonces;
@@ -134,8 +135,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @notice Get all active position trade IDs for an account.
     /// @param accountId The account to query.
     /// @return Array of trade IDs.
-    function getAccountPositions(bytes32 accountId) external view returns (bytes32[] memory) {
-        return accountPositions[accountId];
+    function getAccountPositions(bytes32 accountId, address collateralToken) external view returns (bytes32[] memory) {
+        return accountPositions[accountId][collateralToken];
     }
 
     /// @notice Get position details.
@@ -386,8 +387,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         });
 
         // Track positions per account
-        accountPositions[trade.partyA].push(trade.tradeId);
-        accountPositions[trade.partyB].push(trade.tradeId);
+        accountPositions[trade.partyA][trade.collateralToken].push(trade.tradeId);
+        accountPositions[trade.partyB][trade.collateralToken].push(trade.tradeId);
 
         ++activePositionCount;
 
@@ -520,8 +521,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         });
 
         // Track positions per account
-        accountPositions[newPos.partyA].push(newPos.tradeId);
-        accountPositions[newPos.partyB].push(newPos.tradeId);
+        accountPositions[newPos.partyA][newPos.collateralToken].push(newPos.tradeId);
+        accountPositions[newPos.partyB][newPos.collateralToken].push(newPos.tradeId);
 
         ++activePositionCount;
 
@@ -649,5 +650,122 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         uint256 lockedIM = marginVault.getLockedIMByToken(accountId, collateralToken);
         uint256 newMM = riskEngine.calculateMM(lockedIM);
         riskEngine.updateMaintenanceMargin(accountId, collateralToken, newMM);
+    }
+
+    // ─── Liquidation ────────────────────────────────────────────────────
+
+    /// @notice Transfer all positions from a liquidated account to a liquidator.
+    /// @dev Called by the LiquidationEngine during absorbPosition.
+    ///      Handles the transfer of positions, margin requirements, and notional tracking.
+    ///      Also transfers ERC-1155 position tokens to maintain the invariant: token holder = position owner.
+    /// @param liquidatedAccount The account being liquidated.
+    /// @param liquidatorAccountId The liquidator's account taking over positions.
+    /// @param collateralToken The collateral token for the liquidation.
+    /// @param imAmount The initial margin amount to lock for the liquidator.
+    /// @return positionIds Array of tradeIds transferred.
+    function transferPositions(
+        bytes32 liquidatedAccount,
+        bytes32 liquidatorAccountId,
+        address collateralToken,
+        uint256 imAmount
+    ) external onlyRole(LIQUIDATION_ENGINE_ROLE) returns (bytes32[] memory positionIds) {
+        // Get all positions for the liquidated account
+        bytes32[] storage positions_ = accountPositions[liquidatedAccount][collateralToken];
+        
+        // Get owner addresses for token transfers
+        address liquidatedOwner = whitelist.getAccountOwner(liquidatedAccount);
+        address liquidatorOwner = whitelist.getAccountOwner(liquidatorAccountId);
+        
+        // Count active positions for this collateral token
+        uint256 activeCount;
+        for (uint256 i = 0; i < positions_.length; i++) {
+            if (positions[positions_[i]].active) {
+                activeCount++;
+            }
+        }
+        
+        positionIds = new bytes32[](activeCount);
+        uint256 index;
+        
+        // Transfer each active position for this collateral token
+        for (uint256 i = 0; i < positions_.length; i++) {
+            NovatedPosition storage pos = positions[positions_[i]];
+            if (pos.active) {
+                positionIds[index] = positions_[i];
+                index++;
+                
+                // Determine which party is being liquidated and update
+                // Also transfer the corresponding ERC-1155 position token
+                if (pos.partyA == liquidatedAccount) {
+                    pos.partyA = liquidatorAccountId;
+                    // Transfer tokenIdA from liquidatedOwner to liquidatorOwner
+                    if (instrument.balanceOf(liquidatedOwner, pos.tokenIdA) >= pos.notional) {
+                        instrument.transferPosition(liquidatedOwner, liquidatorOwner, pos.tokenIdA, pos.notional);
+                    }
+                } else if (pos.partyB == liquidatedAccount) {
+                    pos.partyB = liquidatorAccountId;
+                    // Transfer tokenIdB from liquidatedOwner to liquidatorOwner
+                    if (instrument.balanceOf(liquidatedOwner, pos.tokenIdB) >= pos.notional) {
+                        instrument.transferPosition(liquidatedOwner, liquidatorOwner, pos.tokenIdB, pos.notional);
+                    }
+                }
+                
+                // Add position to liquidator's account
+                accountPositions[liquidatorAccountId][collateralToken].push(positions_[i]);
+            }
+        }
+        
+        // Clear positions array for liquidated account (they've been transferred)
+        delete accountPositions[liquidatedAccount][collateralToken];
+        
+        // Update notional tracking
+        // Add notional to liquidator's owner
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            NovatedPosition storage pos_ = positions[positionIds[i]];
+            whitelist.addNotional(liquidatorOwner, pos_.notional);
+        }
+        
+        // Lock initial margin for the liquidator
+        if (imAmount > 0) {
+            marginVault.lockInitialMargin(liquidatorAccountId, collateralToken, imAmount);
+        }
+        
+        // Update maintenance margin for liquidator
+        _updateAccountMaintenanceMargin(liquidatorAccountId, collateralToken);
+        
+        // Release IM from liquidated account (all IM for this token)
+        uint256 lockedIM = marginVault.getLockedIMByToken(liquidatedAccount, collateralToken);
+        if (lockedIM > 0) {
+            marginVault.releaseInitialMargin(liquidatedAccount, collateralToken, lockedIM);
+        }
+        
+        // Update maintenance margin for liquidated account
+        _updateAccountMaintenanceMargin(liquidatedAccount, collateralToken);
+        
+        // Remove notional from liquidated account's owner
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            NovatedPosition storage pos_ = positions[positionIds[i]];
+            whitelist.removeNotional(liquidatedOwner, pos_.notional);
+        }
+        
+        emit PositionsTransferred(liquidatedAccount, liquidatorAccountId, positionIds, collateralToken);
+    }
+
+    /// @notice Get the total IM requirement for an account's positions in a specific collateral token.
+    /// @param accountId The account to query.
+    /// @param collateralToken The collateral token to filter by.
+    /// @return totalIM The total IM required for all positions.
+    function getTotalIMForToken(
+        bytes32 accountId,
+        address collateralToken
+    ) external view returns (uint256 totalIM) {
+        bytes32[] storage positions_ = accountPositions[accountId][collateralToken];
+        for (uint256 i = 0; i < positions_.length; i++) {
+            NovatedPosition storage pos = positions[positions_[i]];
+            if (pos.active && pos.collateralToken == collateralToken) {
+                uint256 tenor = pos.maturityDate - pos.startDate;
+                totalIM += riskEngine.calculateIM(pos.notional, tenor);
+            }
+        }
     }
 }

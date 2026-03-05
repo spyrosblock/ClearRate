@@ -159,5 +159,5 @@ Read commands:
 
 Improvements:
 - When creating a new trade, take into account all other position that the user has in order to calculate the IM. Instead of `riskEngine.calculateIM(trade.notional, tenor)` you can do `riskEngine.calculateIM(otherTrades, trade.notional, tenor);`
-- 
+- Update the notional field of the users table
 

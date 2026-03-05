@@ -12,6 +12,9 @@
     "types": ["bun-types"]
   },
   "include": [
-    "main.ts"
+    "main.ts",
+    "types.ts",
+    "http-utils.ts",
+    "event-handlers/**/*.ts"
   ]
 }

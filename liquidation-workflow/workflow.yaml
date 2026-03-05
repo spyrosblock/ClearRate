@@ -1,0 +1,23 @@
+# ==========================================================================
+# CRE WORKFLOW SETTINGS — Liquidation Workflow
+# ==========================================================================
+# Monitors and initiates liquidation auctions for undercollateralized accounts
+# by calling the LiquidationEngine._processReport() function with reportType = 0.
+
+# ==========================================================================
+staging-settings:
+  user-workflow:
+    workflow-name: "liquidation-workflow"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.staging.json"
+    secrets-path: "../secrets.yaml"
+
+# ==========================================================================
+production-settings:
+  user-workflow:
+    workflow-name: "liquidation-workflow-production"
+  workflow-artifacts:
+    workflow-path: "./main.ts"
+    config-path: "./config.production.json"
+    secrets-path: ""

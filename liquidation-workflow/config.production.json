@@ -1,0 +1,13 @@
+{
+  "schedule": "0 * * * *",
+  "evms": [
+    {
+      "liquidationEngineAddress": "0x0000000000000000000000000000000000000000",
+      "chainSelectorName": "ethereum-mainnet",
+      "gasLimit": "500000"
+    }
+  ],
+  "liquidationMonitoring": {
+    "apiEndpoint": "https://clear-rate.vercel.app/api/liquidation-monitoring/targets"
+  }
+}
