@@ -1,88 +1,198 @@
 import { NextResponse } from 'next/server';
+import { sql } from '@/lib/db';
 
 /**
- * Position data structure received from the workflow.
- * This represents the NovatedPosition struct from the ClearingHouse contract.
+ * Swap position data structure matching the swap_positions table schema.
+ * This represents an IRS position from the database.
  */
-interface PositionData {
-  tradeId: string;
-  tokenIdA: string;
-  tokenIdB: string;
-  partyA: string;
-  partyB: string;
-  notional: string;
-  fixedRateBps: string;
-  startDate: string;
-  maturityDate: string;
-  active: boolean;
-  lastNpv: string;
+interface SwapPosition {
+  token_id: string;              // uint256 as string (ERC-1155 token ID)
+  owner_id: string;              // bytes32 account ID (pays fixed)
+  balance: string;               // Balance amount (uint256 as string)
+  notional: string;              // Notional amount (uint256 as string)
+  fixed_rate_bps: number;        // Fixed rate in basis points
+  start_date: string;            // Swap effective date (ISO string)
+  maturity_date: string;         // Swap maturity date (ISO string)
+  payment_interval: string;      // Payment interval in seconds (uint256 as string)
+  direction: number;             // Direction of the swap (0=PAY_FIXED, 1=RECEIVE_FIXED)
+  floating_rate_index: string;   // Floating rate index (bytes32 as hex string)
+  day_count_convention: number;  // Day count convention (0=ACT/360, 1=ACT/365, 2=30/360)
+  collateral_token: string;      // Collateral token address
+  active: boolean;               // Position active status
+  last_npv?: string;             // Last mark-to-market NPV (optional)
 }
 
 /**
- * Request body expected from the workflow when reading positions from blockchain.
+ * NPV Change entry - matches NPVChange struct from ClearingHouse contract.
  */
-interface PositionsRequest {
-  positions: PositionData[];
+interface NPVChange {
+  tokenId: string;   // uint256 as string
+  npvChange: string; // int256 as string (can be negative)
+  isFinal: boolean;  // Indicates if this is the final settlement for the token ID.
 }
 
 /**
- * Settlement entry to be returned to the workflow.
+ * VM Settlement entry - matches VMSettlement struct from ClearingHouse contract.
  */
-interface Settlement {
-  tradeId: string;
-  npvChange: string;
-  isFinal: boolean;
+interface VMSettlement {
+  accountId: string;       // bytes32 as hex string
+  collateralToken: string; // address
+  vmChange: string;        // int256 as string (can be negative)
 }
 
 /**
- * POST /api/margin/variation-margin
+ * Constant NPV change value (10,000 tokens with 18 decimals).
+ * This is used as a placeholder for actual NPV calculation.
+ */
+const CONSTANT_NPV_CHANGE = BigInt('10000000000000000000000'); // 10000e18
+
+/**
+ * Get NPV change for a position.
+ * Returns the CONSTANT_NPV_CHANGE based on the position's direction.
  * 
- * Receives positions data from the workflow and calculates variation margin settlements.
+ * @param position - The swap position
+ * @returns The NPV change as a signed bigint
+ */
+function getNpvChange(position: SwapPosition): bigint {
+  // For PAY_FIXED (0): positive NPV change
+  // For RECEIVE_FIXED (1): negative NPV change
+  if (position.direction === 1) {
+    return -CONSTANT_NPV_CHANGE;
+  }
+  
+  return CONSTANT_NPV_CHANGE;
+}
+
+/**
+ * Calculate VM change for a position based on its balance/notional ratio.
  * 
- * Request body:
- * - positions: Array of position data read from the blockchain
+ * Formula: (balance / notional) * NPV change from getNpvChange
+ * 
+ * @param position - The swap position
+ * @returns The calculated VM change as a signed bigint
+ */
+function calculateVMChange(position: SwapPosition): bigint {
+  const balance = BigInt(position.balance);
+  const notional = BigInt(position.notional);
+  
+  // Avoid division by zero
+  if (notional === BigInt(0)) {
+    return BigInt(0);
+  }
+  
+  // Get NPV change for this position
+  const npvChange = getNpvChange(position);
+  
+  // Calculate: (balance * npvChange) / notional
+  const vmChange = (balance * npvChange) / notional;
+  
+  return vmChange;
+}
+
+/**
+ * POST /api/variation-margin
+ * 
+ * Queries swap positions from the database and calculates variation margin settlements.
  * 
  * Response structure:
- * - settlements: Array of VM settlement entries with tradeId, npvChange, isFinal
- * - metadata: Settlement metadata including date and NPV source
+ * - npvChanges: Array of NPVChange entries (one per token)
+ * - vmSettlements: Array of VMSettlement entries (aggregated by account/collateral)
+ * - metadata: Settlement metadata including date and counts
  */
 export async function POST(request: Request) {
   try {
-    const body: PositionsRequest = await request.json();
+    // Query active positions from the swap_positions table
+    const positions = await sql`
+      SELECT 
+        token_id,
+        owner_id,
+        balance::text as balance,
+        notional::text as notional,
+        fixed_rate_bps,
+        start_date::text as start_date,
+        maturity_date::text as maturity_date,
+        payment_interval::text as payment_interval,
+        direction,
+        floating_rate_index,
+        day_count_convention,
+        collateral_token,
+        active,
+        COALESCE(last_npv::text, '0') as last_npv
+      FROM swap_positions
+      WHERE active = TRUE
+    ` as SwapPosition[];
     
-    const { positions } = body;
-    
-    if (!positions || !Array.isArray(positions) || positions.length === 0) {
+    if (positions.length === 0) {
       return NextResponse.json(
-        { error: 'No positions provided' },
-        { status: 400 }
+        {
+          npvChanges: [],
+          vmSettlements: [],
+          settlements: [],
+          metadata: {
+            settlementDate: new Date().toISOString().split('T')[0],
+            npvSource: 'constant',
+            positionsCount: 0,
+            activePositionsCount: 0,
+          }
+        },
+        { status: 200 }
       );
     }
 
-    // Calculate settlements for each position
-    const settlements: Settlement[] = positions
-      .filter((pos) => pos.active) // Only process active positions
-      .map((pos) => {
-        const npvChange = 10000e18;  // 10k
-        
-        // Determine if position is matured (for demonstration, positions with maturity < now would be final)
-        // In production, you'd check actual timestamps
-        const isFinal = false; // Regular VM settlement
-        
-        return {
-          tradeId: pos.tradeId,
-          npvChange: npvChange.toString(),
-          isFinal,
-        };
+    // Create NPV changes array - one entry per unique token (deduplicated)
+    const npvChangesMap = new Map<string, NPVChange>();
+    
+    for (const position of positions) {
+      // Skip if we already have an entry for this token
+      if (npvChangesMap.has(position.token_id)) {
+        continue;
+      }
+      
+      // Get NPV change for this position using getNpvChange function
+      const npvChange = getNpvChange(position).toString();
+      
+      npvChangesMap.set(position.token_id, {
+        tokenId: position.token_id,
+        npvChange: npvChange,
+        isFinal: false, // Regular VM settlement, not final
       });
+    }
+    
+    const npvChanges: NPVChange[] = Array.from(npvChangesMap.values());
+
+    // Aggregate VM settlements by account/collateral token
+    // Key: "accountId:collateralToken", Value: aggregated VM change
+    const vmSettlementMap = new Map<string, bigint>();
+    
+    for (const position of positions) {
+      const vmChange = calculateVMChange(position);
+      const key = `${position.owner_id}:${position.collateral_token}`;
+      
+      const existingChange = vmSettlementMap.get(key) || BigInt(0);
+      vmSettlementMap.set(key, existingChange + vmChange);
+    }
+    
+    // Convert map to VMSettlement array
+    const vmSettlements: VMSettlement[] = [];
+    for (const [key, vmChange] of vmSettlementMap.entries()) {
+      const [accountId, collateralToken] = key.split(':');
+      vmSettlements.push({
+        accountId,
+        collateralToken,
+        vmChange: vmChange.toString(),
+      });
+    }
 
     const response = {
-      settlements,
+      npvChanges,
+      vmSettlements,
       metadata: {
         settlementDate: new Date().toISOString().split('T')[0],
-        npvSource: 'internal',
+        npvSource: 'constant',
         positionsCount: positions.length,
-        activePositionsCount: settlements.length,
+        activePositionsCount: positions.length,
+        npvChangesCount: npvChanges.length,
+        vmSettlementsCount: vmSettlements.length,
       },
     };
 
