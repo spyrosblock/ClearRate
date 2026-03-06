@@ -9,6 +9,8 @@ interface AbsorbPositionsRequest {
   liquidatedId: string;      // bytes32 account ID of the liquidated party
   collateralToken: string;   // Collateral token address (0x...)
   liquidatedTransfer: string; // Net amount to transfer from liquidated to liquidator (int256 as string)
+  newMMLiquidated: string;   // New maintenance margin for liquidated account
+  newMMLiquidator: string;   // New maintenance margin for liquidator account
 }
 
 /**
@@ -33,12 +35,12 @@ export async function POST(request: Request) {
   try {
     const body: AbsorbPositionsRequest = await request.json();
     
-    const { liquidatedId, collateralToken, liquidatorId, liquidatedTransfer } = body;
+    const { liquidatedId, collateralToken, liquidatorId, liquidatedTransfer, newMMLiquidated, newMMLiquidator } = body;
     
     // Validate required fields
-    if (!liquidatedId || !collateralToken || !liquidatorId || liquidatedTransfer === undefined) {
+    if (!liquidatedId || !collateralToken || !liquidatorId || liquidatedTransfer === undefined || newMMLiquidated === undefined || newMMLiquidator === undefined) {
       return NextResponse.json(
-        { error: 'Missing required fields: liquidatedId, collateralToken, liquidatorId, and liquidatedTransfer are required' },
+        { error: 'Missing required fields: liquidatedId, collateralToken, liquidatorId, liquidatedTransfer, newMMLiquidated, and newMMLiquidator are required' },
         { status: 400 }
       );
     }
@@ -122,6 +124,25 @@ export async function POST(request: Request) {
           `;
         }
       }
+
+      // Update maintenance margins for both accounts
+      await sql`
+        INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
+        VALUES (${liquidatedId}, 0, ${newMMLiquidated}::numeric, ${collateralToken})
+        ON CONFLICT (account_id, collateral_token) 
+        DO UPDATE SET 
+          maintenance_margin = ${newMMLiquidated}::numeric,
+          updated_at = NOW()
+      `;
+
+      await sql`
+        INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
+        VALUES (${liquidatorId}, 0, ${newMMLiquidator}::numeric, ${collateralToken})
+        ON CONFLICT (account_id, collateral_token) 
+        DO UPDATE SET 
+          maintenance_margin = ${newMMLiquidator}::numeric,
+          updated_at = NOW()
+      `;
 
       await sql`COMMIT`;
 

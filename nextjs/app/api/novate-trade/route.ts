@@ -22,6 +22,8 @@ interface NovatedPositionPayload {
 	active: boolean
 	lastNpv: string
 	collateralToken: string
+	newMMA: string
+	newMMB: string
 }
 
 // ─── Helper to convert Unix timestamp to ISO date string ─────────────────
@@ -140,6 +142,26 @@ export async function POST(request: Request) {
 				collateral_token = EXCLUDED.collateral_token,
 				active = EXCLUDED.active,
 				last_npv = EXCLUDED.last_npv,
+				updated_at = NOW()
+		`
+
+		// Update maintenance margin for Party A in liquidation_monitoring
+		await sql`
+			INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
+			VALUES (${payload.partyA}, 0, ${payload.newMMA}::numeric, ${payload.collateralToken})
+			ON CONFLICT (account_id, collateral_token) 
+			DO UPDATE SET 
+				maintenance_margin = ${payload.newMMA}::numeric,
+				updated_at = NOW()
+		`
+
+		// Update maintenance margin for Party B in liquidation_monitoring
+		await sql`
+			INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
+			VALUES (${payload.partyB}, 0, ${payload.newMMB}::numeric, ${payload.collateralToken})
+			ON CONFLICT (account_id, collateral_token) 
+			DO UPDATE SET 
+				maintenance_margin = ${payload.newMMB}::numeric,
 				updated_at = NOW()
 		`
 
