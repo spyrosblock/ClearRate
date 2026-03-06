@@ -138,82 +138,84 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Check if user with this address already exists
-    const existingUser = await sql`
-      SELECT id FROM users WHERE address = ${address}
-    `;
+    // todo: uncomment this (commented it because it uses neon db cpu)
     
-    if (existingUser.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'User with this address already exists' },
-        { status: 409 }
-      );
-    }
+    // // Check if user with this address already exists
+    // const existingUser = await sql`
+    //   SELECT id FROM users WHERE address = ${address}
+    // `;
     
-    // Check if registration number already exists
-    const existingReg = await sql`
-      SELECT id FROM users WHERE registration_number = ${company.registrationNumber}
-    `;
+    // if (existingUser.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'User with this address already exists' },
+    //     { status: 409 }
+    //   );
+    // }
     
-    if (existingReg.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'Company with this registration number already exists' },
-        { status: 409 }
-      );
-    }
+    // // Check if registration number already exists
+    // const existingReg = await sql`
+    //   SELECT id FROM users WHERE registration_number = ${company.registrationNumber}
+    // `;
     
-    // Check if LEI already exists
-    const existingLei = await sql`
-      SELECT id FROM users WHERE lei = ${company.lei}
-    `;
+    // if (existingReg.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'Company with this registration number already exists' },
+    //     { status: 409 }
+    //   );
+    // }
     
-    if (existingLei.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'Company with this LEI already exists' },
-        { status: 409 }
-      );
-    }
+    // // Check if LEI already exists
+    // const existingLei = await sql`
+    //   SELECT id FROM users WHERE lei = ${company.lei}
+    // `;
     
-    // Insert user into database
-    const result = await sql`
-      INSERT INTO users (
-        address,
-        account_id,
-        company_name,
-        registration_number,
-        registered_country,
-        contact_email,
-        lei,
-        website,
-        articles_of_association,
-        certificate_of_incorporation,
-        vat_certificate,
-        iban,
-        bic,
-        approved,
-        valid_until,
-        max_notional,
-        notional
-      ) VALUES (
-        ${address},
-        ${accountId || null},
-        ${company.companyName},
-        ${company.registrationNumber},
-        ${company.registeredCountry},
-        ${company.contactEmail},
-        ${company.lei},
-        ${company.website},
-        ${company.uploadedLegalDocs.articlesOfAssociation},
-        ${company.uploadedLegalDocs.certificateOfIncorporation},
-        ${company.uploadedLegalDocs.vatCertificate},
-        ${company.bankDetails.iban},
-        ${company.bankDetails.bic},
-        ${approved ?? false},
-        ${validUntil ? new Date(validUntil) : null},
-        ${maxNotional || '0'},
-        ${notional || '0'}
-      )
-    `;
+    // if (existingLei.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'Company with this LEI already exists' },
+    //     { status: 409 }
+    //   );
+    // }
+    
+    // // Insert user into database
+    // const result = await sql`
+    //   INSERT INTO users (
+    //     address,
+    //     account_id,
+    //     company_name,
+    //     registration_number,
+    //     registered_country,
+    //     contact_email,
+    //     lei,
+    //     website,
+    //     articles_of_association,
+    //     certificate_of_incorporation,
+    //     vat_certificate,
+    //     iban,
+    //     bic,
+    //     approved,
+    //     valid_until,
+    //     max_notional,
+    //     notional
+    //   ) VALUES (
+    //     ${address},
+    //     ${accountId || null},
+    //     ${company.companyName},
+    //     ${company.registrationNumber},
+    //     ${company.registeredCountry},
+    //     ${company.contactEmail},
+    //     ${company.lei},
+    //     ${company.website},
+    //     ${company.uploadedLegalDocs.articlesOfAssociation},
+    //     ${company.uploadedLegalDocs.certificateOfIncorporation},
+    //     ${company.uploadedLegalDocs.vatCertificate},
+    //     ${company.bankDetails.iban},
+    //     ${company.bankDetails.bic},
+    //     ${approved ?? false},
+    //     ${validUntil ? new Date(validUntil) : null},
+    //     ${maxNotional || '0'},
+    //     ${notional || '0'}
+    //   )
+    // `;
     
     console.log('[Users API] User created successfully:');
     console.log('  Address:', address);
