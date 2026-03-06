@@ -1,6 +1,6 @@
 {
   "trade": {
-    "tradeId": "0x14a00cb8f7d75b7dacb002edb7e045d7fcc5ac80bf5dd3daffd7d164a0dd88ae",
+    "tradeId": "0xa80f53a919c56e65d12c79534a4b273ec7b1a40449caa3f595a797caae3abfee",
     "partyA": "0x000000000000000000000000474b4e7fd1a143edea6b77aa845f429d443e6410",
     "partyB": "0x000000000000000000000000f68d9e0faa751ad61e0ed70852798bf9d9c04bf7",
     "notional": "1000000000000000000000000",
@@ -10,12 +10,12 @@
     "paymentInterval": 7776000,
     "dayCountConvention": 0,
     "floatingRateIndex": "0xc08d7a87ed14b50e2326878bceecda42cfb5c0ac695493788b450ac63da39744",
-    "nonce": 3849161,
+    "nonce": 7788786,
     "deadline": 1772953200,
     "collateralToken": "0xbb46678a1F6C527bD79eCFBF85332B8Ae83ceaf1"
   },
-  "sigA": "0x55ce0d1d8e6ebd7242f0f587c0d918980f8d2a01cde52c3085c7f7f3762a26b21ae760f3840d79ccea2ac43b021390f83eff17027e305b19fcc0720fe61d37491b",
-  "sigB": "0xee29e5e51cfcc20a3c00d1dcf8e02402f185a161864e88946caab4514e4d30b52fb8acb77db5dcf55a9d17433278714bf3d58e6f30b95408d7c5f075e63864af1c",
+  "sigA": "0x05002aa5e16eb7662f5594619536b17118db497b765c267384de53a08add5cbd109431b1a2223add9cdbbd2cbded41b7aa4f887dfb97ef0320109fe8fcd68b871b",
+  "sigB": "0xc4581f857fb7e637687ea6544358adc49c4477d9f84229934b77def97fd6865b7438edf6508091ef2b00073f700397a19e4ab6e52b745a594eab3028e446188f1c",
   "metadata": {
     "notionalFormatted": "1000000.0 USDC",
     "fixedRateFormatted": "3.50%",

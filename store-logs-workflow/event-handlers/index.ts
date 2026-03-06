@@ -5,8 +5,8 @@ import { handleTradeNovated, type TradeNovatedArgs } from './trade-novated.handl
 import { handlePositionMatured, type PositionMaturedArgs } from './position-matured.handler'
 import { handleMarginDeposited, type MarginDepositedArgs } from './margin-deposited.handler'
 import { handleMarginWithdrawn, type MarginWithdrawnArgs } from './margin-withdrawn.handler'
-import { handleAccountMMUpdated, type AccountMMUpdatedArgs } from './account-mm-updated.handler'
 import { handlePositionsAbsorbed, type PositionsAbsorbedArgs } from './positions-absorbed.handler'
+import { handlePositionTransferred, type PositionTransferredArgs } from './position-transferred.handler'
 
 // ─── Event Handler Registry ─────────────────────────────────────────────────
 
@@ -15,8 +15,8 @@ export type EventName =
 	| 'PositionMatured'
 	| 'MarginDeposited'
 	| 'MarginWithdrawn'
-	| 'AccountMMUpdated'
 	| 'PositionsAbsorbed'
+	| 'PositionTransferred'
 
 export interface HandlerRegistryEntry {
 	handler: EventHandlerFunction
@@ -40,13 +40,13 @@ const handlerRegistry: Record<EventName, HandlerRegistryEntry> = {
 		handler: handleMarginWithdrawn,
 		description: 'Handles margin withdrawal events from MarginVault',
 	},
-	AccountMMUpdated: {
-		handler: handleAccountMMUpdated,
-		description: 'Handles maintenance margin update events from RiskEngine',
-	},
 	PositionsAbsorbed: {
 		handler: handlePositionsAbsorbed,
 		description: 'Handles position absorption events from LiquidationEngine',
+	},
+	PositionTransferred: {
+		handler: handlePositionTransferred,
+		description: 'Handles position transfer events from ClearingHouse',
 	},
 }
 
@@ -93,8 +93,8 @@ export type {
 	PositionMaturedArgs,
 	MarginDepositedArgs,
 	MarginWithdrawnArgs,
-	AccountMMUpdatedArgs,
 	PositionsAbsorbedArgs,
+	PositionTransferredArgs,
 }
 
 export {
@@ -102,6 +102,6 @@ export {
 	handlePositionMatured,
 	handleMarginDeposited,
 	handleMarginWithdrawn,
-	handleAccountMMUpdated,
 	handlePositionsAbsorbed,
+	handlePositionTransferred,
 }

@@ -113,10 +113,21 @@ withdraw-margin-sepolia:
 # USER 3 ABSORBS POSITIONS FROM USER 2
 # ============================================
 
-# Whitelist 2 users on Sepolia
 absorb-positions-sepolia:
 	@echo "User 3 absorbs positions from User 2..."
 	@forge script script/AbsorbPositions.s.sol:AbsorbPositions \
+		--rpc-url sepolia \
+		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--broadcast \
+		-vv
+
+# ============================================
+# USER 1 TRANSFERS 20% OF TOKENID 0 TO USER 2
+# ============================================
+
+transfer-position-sepolia:
+	@echo "User 1 transfers 20% of TokenID 0 to User 2..."
+	@forge script script/TransferPosition.s.sol:TransferPosition \
 		--rpc-url sepolia \
 		--private-key $(DEPLOYER_PRIVATE_KEY) \
 		--broadcast \

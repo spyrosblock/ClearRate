@@ -25,6 +25,9 @@ export const configSchema = z.object({
 	positionMaturedApi: z.object({
 		url: z.string(),
 	}),
+	transferPositionApi: z.object({
+		url: z.string(),
+	}),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -59,10 +62,14 @@ export type NovatedPositionPayload = {
 	active: boolean
 	lastNpv: string
 	collateralToken: string
+	newMMA: string
+	newMMB: string
 }
 
 export type PositionMaturedPayload = {
 	tokenId: string
+	accountId: string
+	newMM: string
 }
 
 export type CreateMarginRecordPayload = {

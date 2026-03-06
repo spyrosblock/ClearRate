@@ -60,7 +60,9 @@ interface IClearingHouse {
         uint256 paymentInterval,
         uint8 dayCountConvention,
         bytes32 floatingRateIndex,
-        address collateralToken
+        address collateralToken,
+        uint256 newMMA,
+        uint256 newMMB
     );
     event NpvUpdated(
         uint256 indexed tokenId,
@@ -72,7 +74,7 @@ interface IClearingHouse {
         int256 vmChange,
         uint256 timestamp
     );
-    event PositionMatured(uint256 indexed tokenId, uint256 timestamp);
+    event PositionMatured(uint256 indexed tokenId, bytes32 indexed accountId, uint256 newMM);
     event PositionClosed(uint256 indexed tokenId, bytes32 accountId);
     event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event PositionsAbsorbed(
@@ -80,7 +82,18 @@ interface IClearingHouse {
         bytes32 indexed toAccount,
         uint256[] tokenIds,
         address collateralToken,
-        int256 liquidatedTransfer
+        int256 liquidatedTransfer,
+        uint256 newMMLiquidated,
+        uint256 newMMLiquidator
+    );
+    event PositionTransferred(
+        uint256 indexed tokenId,
+        bytes32 indexed fromAccount,
+        bytes32 indexed toAccount,
+        uint256 amount,
+        address collateralToken,
+        uint256 newMMFrom,
+        uint256 newMMTo
     );
 
     // ─── Errors ─────────────────────────────────────────────────────────
@@ -103,4 +116,6 @@ interface IClearingHouse {
     error InvalidReportType(uint8 reportType);
     error InvalidCollateralToken(address token);
     error InsufficientTokenBalance(uint256 tokenId, uint256 requested, uint256 available);
+    error AccountNotFound(bytes32 accountId);
+    error RecipientNotWhitelisted(bytes32 accountId);
 }

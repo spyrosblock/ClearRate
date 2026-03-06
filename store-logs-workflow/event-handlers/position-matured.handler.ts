@@ -6,7 +6,8 @@ import { postToApi } from '../http-utils'
 
 export type PositionMaturedArgs = {
 	tokenId: bigint
-	timestamp: bigint
+	accountId: `0x${string}`
+	newMM: bigint
 }
 
 // ─── Event Handler ───────────────────────────────────────────────────────────
@@ -19,12 +20,14 @@ export const handlePositionMatured: EventHandlerFunction = (
 	const typedArgs = args as PositionMaturedArgs
 
 	runtime.log(
-		`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | timestamp ${typedArgs.timestamp}`,
+		`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | accountId ${typedArgs.accountId} | newMM ${typedArgs.newMM}`,
 	)
 
 	// Prepare the payload to update the position as inactive
 	const payload: PositionMaturedPayload = {
 		tokenId: typedArgs.tokenId.toString(),
+		accountId: typedArgs.accountId,
+		newMM: typedArgs.newMM.toString(),
 	}
 
 	runtime.log(`Updating position to inactive: ${JSON.stringify(payload)}`)

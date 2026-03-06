@@ -15,12 +15,12 @@ import { isRegisteredEvent, executeHandler, type EventName } from './event-handl
 
 // Full event ABI matching the IClearingHouse.sol, MarginVault.sol, RiskEngine.sol, and LiquidationEngine.sol contracts
 const eventAbi = parseAbi([
-	'event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)',
-	'event PositionMatured(uint256 indexed tokenId, uint256 timestamp)',
+	'event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken, uint256 newMMA, uint256 newMMB)',
+	'event PositionMatured(uint256 indexed tokenId, bytes32 indexed accountId, uint256 newMM)',
 	'event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)',
 	'event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)',
-	'event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)',
-	'event PositionsAbsorbed(bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256[] tokenIds, address collateralToken, int256 liquidatedTransfer)',
+	'event PositionsAbsorbed(bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256[] tokenIds, address collateralToken, int256 liquidatedTransfer, uint256 newMMLiquidated, uint256 newMMLiquidator)',
+	'event PositionTransferred(uint256 indexed tokenId, bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256 amount, address collateralToken, uint256 newMMFrom, uint256 newMMTo)',
 ])
 
 // ─── Event Log Trigger Handler ─────────────────────────────────────────────

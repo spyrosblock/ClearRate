@@ -16532,6 +16532,9 @@ var configSchema = exports_external.object({
   }),
   positionMaturedApi: exports_external.object({
     url: exports_external.string()
+  }),
+  transferPositionApi: exports_external.object({
+    url: exports_external.string()
   })
 });
 var getFromApi = (sendRequester, url) => {
@@ -16588,7 +16591,9 @@ var handleTradeNovated = async (context) => {
     floatingRateIndex: typedArgs.floatingRateIndex,
     active: true,
     lastNpv: "0",
-    collateralToken: typedArgs.collateralToken
+    collateralToken: typedArgs.collateralToken,
+    newMMA: typedArgs.newMMA.toString(),
+    newMMB: typedArgs.newMMB.toString()
   };
   runtime2.log(`Storing novated position: ${JSON.stringify(payload)}`);
   const httpClient = new cre.capabilities.HTTPClient;
@@ -16599,9 +16604,11 @@ var handleTradeNovated = async (context) => {
 var handlePositionMatured = (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
-  runtime2.log(`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | timestamp ${typedArgs.timestamp}`);
+  runtime2.log(`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | accountId ${typedArgs.accountId} | newMM ${typedArgs.newMM}`);
   const payload = {
-    tokenId: typedArgs.tokenId.toString()
+    tokenId: typedArgs.tokenId.toString(),
+    accountId: typedArgs.accountId,
+    newMM: typedArgs.newMM.toString()
   };
   runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
   const httpClient = new cre.capabilities.HTTPClient;
@@ -16678,24 +16685,10 @@ var handleMarginWithdrawn = (context) => {
   runtime2.log(`Warning: Failed to get record for account ${typedArgs.accountId} - response: ${existingRecordResult.body}`);
   return { success: false, message: `Failed to get record for account ${typedArgs.accountId}` };
 };
-var handleAccountMMUpdated = (context) => {
-  const { runtime: runtime2, args, config } = context;
-  const typedArgs = args;
-  runtime2.log(`Event AccountMMUpdated detected: accountId ${typedArgs.accountId} | collateralToken ${typedArgs.collateralToken} | oldMM ${typedArgs.oldMM} | newMM ${typedArgs.newMM}`);
-  const updateUrl = `${config.liquidationMonitoringApi.url}/update-maintenance-margin`;
-  const httpClient = new cre.capabilities.HTTPClient;
-  const updateResult = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, updateUrl, {
-    accountId: typedArgs.accountId,
-    maintenanceMargin: typedArgs.newMM.toString(),
-    collateralToken: typedArgs.collateralToken
-  }), consensusIdenticalAggregation())(config).result();
-  runtime2.log(`Successfully updated maintenance margin. Status: ${updateResult.statusCode}`);
-  return { success: true, message: `Updated maintenance margin for account ${typedArgs.accountId}` };
-};
 var handlePositionsAbsorbed = async (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
-  runtime2.log(`Event PositionsAbsorbed detected: fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | collateralToken ${typedArgs.collateralToken} | tokenIds count ${typedArgs.tokenIds.length} | liquidatedTransfer ${typedArgs.liquidatedTransfer}`);
+  runtime2.log(`Event PositionsAbsorbed detected: fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | collateralToken ${typedArgs.collateralToken} | tokenIds count ${typedArgs.tokenIds.length} | liquidatedTransfer ${typedArgs.liquidatedTransfer} | newMMLiquidated ${typedArgs.newMMLiquidated} | newMMLiquidator ${typedArgs.newMMLiquidator}`);
   const httpClient = new cre.capabilities.HTTPClient;
   const absorbPositionsUrl = config.absorbPositionsApi.url;
   runtime2.log(`Calling absorb-positions API at: ${absorbPositionsUrl}`);
@@ -16703,13 +16696,38 @@ var handlePositionsAbsorbed = async (context) => {
     liquidatedId: typedArgs.fromAccount,
     collateralToken: typedArgs.collateralToken,
     liquidatorId: typedArgs.toAccount,
-    liquidatedTransfer: typedArgs.liquidatedTransfer.toString()
+    liquidatedTransfer: typedArgs.liquidatedTransfer.toString(),
+    newMMLiquidated: typedArgs.newMMLiquidated.toString(),
+    newMMLiquidator: typedArgs.newMMLiquidator.toString()
   }), consensusIdenticalAggregation())(config).result();
   runtime2.log(`Absorb-positions API response status: ${result.statusCode}`);
   if (result.statusCode >= 200 && result.statusCode < 300) {
     return { success: true, message: `Successfully processed PositionsAbsorbed for account ${typedArgs.fromAccount}` };
   } else {
     return { success: false, message: `Failed to process PositionsAbsorbed - API returned status ${result.statusCode}` };
+  }
+};
+var handlePositionTransferred = async (context) => {
+  const { runtime: runtime2, args, config } = context;
+  const typedArgs = args;
+  runtime2.log(`Event PositionTransferred detected: tokenId ${typedArgs.tokenId} | fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | amount ${typedArgs.amount} | collateralToken ${typedArgs.collateralToken} | newMMFrom ${typedArgs.newMMFrom} | newMMTo ${typedArgs.newMMTo}`);
+  const httpClient = new cre.capabilities.HTTPClient;
+  const transferPositionUrl = config.transferPositionApi.url;
+  runtime2.log(`Calling transfer-position API at: ${transferPositionUrl}`);
+  const result = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, transferPositionUrl, {
+    tokenId: typedArgs.tokenId.toString(),
+    fromAccountId: typedArgs.fromAccount,
+    toAccountId: typedArgs.toAccount,
+    amount: typedArgs.amount.toString(),
+    collateralToken: typedArgs.collateralToken,
+    newMMFrom: typedArgs.newMMFrom.toString(),
+    newMMTo: typedArgs.newMMTo.toString()
+  }), consensusIdenticalAggregation())(config).result();
+  runtime2.log(`Transfer-position API response status: ${result.statusCode}`);
+  if (result.statusCode >= 200 && result.statusCode < 300) {
+    return { success: true, message: `Successfully processed PositionTransferred for token ${typedArgs.tokenId}` };
+  } else {
+    return { success: false, message: `Failed to process PositionTransferred - API returned status ${result.statusCode}` };
   }
 };
 var handlerRegistry = {
@@ -16729,13 +16747,13 @@ var handlerRegistry = {
     handler: handleMarginWithdrawn,
     description: "Handles margin withdrawal events from MarginVault"
   },
-  AccountMMUpdated: {
-    handler: handleAccountMMUpdated,
-    description: "Handles maintenance margin update events from RiskEngine"
-  },
   PositionsAbsorbed: {
     handler: handlePositionsAbsorbed,
     description: "Handles position absorption events from LiquidationEngine"
+  },
+  PositionTransferred: {
+    handler: handlePositionTransferred,
+    description: "Handles position transfer events from ClearingHouse"
   }
 };
 var getHandler = (eventName) => {
@@ -16752,12 +16770,12 @@ var executeHandler = async (eventName, context) => {
   return entry.handler(context);
 };
 var eventAbi = parseAbi([
-  "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
-  "event PositionMatured(uint256 indexed tokenId, uint256 timestamp)",
+  "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken, uint256 newMMA, uint256 newMMB)",
+  "event PositionMatured(uint256 indexed tokenId, bytes32 indexed accountId, uint256 newMM)",
   "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
   "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
-  "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)",
-  "event PositionsAbsorbed(bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256[] tokenIds, address collateralToken, int256 liquidatedTransfer)"
+  "event PositionsAbsorbed(bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256[] tokenIds, address collateralToken, int256 liquidatedTransfer, uint256 newMMLiquidated, uint256 newMMLiquidator)",
+  "event PositionTransferred(uint256 indexed tokenId, bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256 amount, address collateralToken, uint256 newMMFrom, uint256 newMMTo)"
 ]);
 var onLogTrigger = async (runtime2, log) => {
   runtime2.log("=== Store Logs Workflow: New Event Detected ===");

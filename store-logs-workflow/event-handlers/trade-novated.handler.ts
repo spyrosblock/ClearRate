@@ -18,6 +18,8 @@ export type TradeNovatedArgs = {
 	dayCountConvention: number
 	floatingRateIndex: `0x${string}`
 	collateralToken: `0x${string}`
+	newMMA: bigint
+	newMMB: bigint
 }
 
 // ─── Event Handler ───────────────────────────────────────────────────────────
@@ -50,6 +52,8 @@ export const handleTradeNovated: EventHandlerFunction = async (
 		active: true,
 		lastNpv: '0', // Will be calculated by subsequent events
 		collateralToken: typedArgs.collateralToken,
+		newMMA: typedArgs.newMMA.toString(),
+		newMMB: typedArgs.newMMB.toString(),
 	}
 
 	runtime.log(`Storing novated position: ${JSON.stringify(payload)}`)

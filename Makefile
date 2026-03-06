@@ -110,8 +110,6 @@ deposit-margin:
 
 # Create the swap via CRE API
 # Store TradeNovated Event (11) - ClearingHouse.sol
-# Store AccountMMUpdated Event (9) - RiskEngine.sol
-# Store AccountMMUpdated Event (10) - RiskEngine.sol
 create-trade:
 	@echo "Generating trade JSON file..."
 	cd contracts && make create-trade-sepolia
@@ -120,8 +118,6 @@ create-trade:
 	cd create-trade-workflow && bun install
 	cre workflow simulate create-trade-workflow --target staging-settings --broadcast --http-payload "$$(cat ./contracts/scripts-js/payloads/trade.json)" --non-interactive --trigger-index 0
 	@echo "Trade created successfully!"
-	$(MAKE) store-logs
-	$(MAKE) store-logs
 	$(MAKE) store-logs
 
 # ===============================================
@@ -140,17 +136,13 @@ settle-vm:
 # ===============================================
 
 # Final variation margin settlement for all positions
-# Store AccountMMUpdated Event (7) - RiskEngine.sol
-# Store AccountMMUpdated Event (13) - RiskEngine.sol
-# Store PositionMatured Event (18) - ClearingHouse.sol
-# Store PositionMatured Event (19) - ClearingHouse.sol
+# Store PositionMatured Event (11) - ClearingHouse.sol
+# Store PositionMatured Event (17) - ClearingHouse.sol
 settle-vm-final:
 	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
 	cre workflow simulate settle-vm-workflow --target final-staging-settings --broadcast
 	@echo "Variation margin settled successfully!"
-	$(MAKE) store-logs
-	$(MAKE) store-logs
 	$(MAKE) store-logs
 	$(MAKE) store-logs
 
@@ -183,13 +175,19 @@ liquidate:
 	cre workflow simulate liquidation-workflow --target staging-settings --broadcast
 
 # Store PositionsAbsorbed Event (9) - ClearingHouse.sol
-# Store AccountMMUpdated Event (3) - RiskEngine.sol
-# Store AccountMMUpdated Event (5) - RiskEngine.sol
 absorb-positions:
 	@echo "Absorbing positions..."
 	cd contracts && make absorb-positions-sepolia
 	$(MAKE) store-logs
-	$(MAKE) store-logs
+
+# ===============================================
+# PARTIAL POSITION TRANSFER
+# ===============================================
+
+# Store PositionTransferred Event (7) - ClearingHouse.sol
+transfer-position:
+	@echo "Transferring positions..."
+	cd contracts && make transfer-position-sepolia
 	$(MAKE) store-logs
 
 # ===============================================
@@ -203,4 +201,4 @@ get-margin-data:
 # ===============================================
 # TROUBLESHOOT
 # ===============================================
-- May need to run: bun x cre-setup on each workflow
+#- May need to run `bun x cre-setup on each workflow` inside the workflows

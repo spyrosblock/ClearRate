@@ -20,5 +20,8 @@
   },
   "positionMaturedApi": {
     "url": ""
+  },
+  "transferPositionApi": {
+    "url": ""
   }
 }

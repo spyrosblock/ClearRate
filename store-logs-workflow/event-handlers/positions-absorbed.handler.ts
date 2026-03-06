@@ -16,6 +16,8 @@ export type PositionsAbsorbedArgs = {
 	tokenIds: readonly bigint[]     // Array of token IDs transferred
 	collateralToken: `0x${string}`  // The collateral token address
 	liquidatedTransfer: bigint      // Net collateral transfer amount (int256)
+	newMMLiquidated: bigint         // New maintenance margin for liquidated account
+	newMMLiquidator: bigint         // New maintenance margin for liquidator account
 }
 
 // ─── Event Handler ───────────────────────────────────────────────────────────
@@ -28,7 +30,7 @@ export const handlePositionsAbsorbed: EventHandlerFunction = async (
 	const typedArgs = args as PositionsAbsorbedArgs
 
 	runtime.log(
-		`Event PositionsAbsorbed detected: fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | collateralToken ${typedArgs.collateralToken} | tokenIds count ${typedArgs.tokenIds.length} | liquidatedTransfer ${typedArgs.liquidatedTransfer}`,
+		`Event PositionsAbsorbed detected: fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | collateralToken ${typedArgs.collateralToken} | tokenIds count ${typedArgs.tokenIds.length} | liquidatedTransfer ${typedArgs.liquidatedTransfer} | newMMLiquidated ${typedArgs.newMMLiquidated} | newMMLiquidator ${typedArgs.newMMLiquidator}`,
 	)
 
 	const httpClient = new cre.capabilities.HTTPClient()
@@ -39,6 +41,8 @@ export const handlePositionsAbsorbed: EventHandlerFunction = async (
 	// - liquidatedId: bytes32 account ID of the liquidated party (fromAccount)
 	// - collateralToken: Collateral token address
 	// - liquidatedTransfer: Net collateral transfer amount
+	// - newMMLiquidated: New maintenance margin for liquidated account
+	// - newMMLiquidator: New maintenance margin for liquidator account
 
 	const absorbPositionsUrl = config.absorbPositionsApi.url
 
@@ -53,6 +57,8 @@ export const handlePositionsAbsorbed: EventHandlerFunction = async (
 					collateralToken: typedArgs.collateralToken,
 					liquidatorId: typedArgs.toAccount,
 					liquidatedTransfer: typedArgs.liquidatedTransfer.toString(),
+					newMMLiquidated: typedArgs.newMMLiquidated.toString(),
+					newMMLiquidator: typedArgs.newMMLiquidator.toString(),
 				}),
 			consensusIdenticalAggregation<{ statusCode: number }>(),
 		)(config)
