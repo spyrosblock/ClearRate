@@ -2,7 +2,7 @@
   "schedule": "0 0 * * *",
   "evms": [
     {
-      "clearingHouseAddress": "0xcf7d004590b7e1bbde71c94aade8f2e4dda9b5c2",
+      "clearingHouseAddress": "0x94da7da8b48db292ecd675396d4d8f9b1541ded3",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "500000"
     }
@@ -10,9 +10,6 @@
   "vmSettlement": {
     "apiEndpoint": "https://clear-rate.vercel.app/api/variation-margin",
     "fallbackEnabled": true
-  },
-  "novatedPositions": {
-    "apiEndpoint": "https://clear-rate.vercel.app/api/novated-positions"
   },
   "updateTotalCollateral": {
     "apiEndpoint": "https://clear-rate.vercel.app/api/liquidation-monitoring/update-total-collateral"

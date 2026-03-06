@@ -5,7 +5,8 @@ import { postToApi } from '../http-utils'
 // ─── Type Definitions ───────────────────────────────────────────────────────
 
 export type PositionMaturedArgs = {
-	tradeId: `0x${string}`
+	tokenId: bigint
+	accountId: `0x${string}`
 	timestamp: bigint
 }
 
@@ -18,12 +19,14 @@ export const handlePositionMatured: EventHandlerFunction = (
 	// Cast args to the expected type for this handler
 	const typedArgs = args as PositionMaturedArgs
 
-	runtime.log(`Event PositionMatured detected: tradeId ${typedArgs.tradeId} | timestamp ${typedArgs.timestamp}`)
+	runtime.log(
+		`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | accountId ${typedArgs.accountId} | timestamp ${typedArgs.timestamp}`,
+	)
 
 	// Prepare the payload to update the position as inactive
 	const payload: PositionMaturedPayload = {
-		action: 'PositionMatured',
-		tradeId: typedArgs.tradeId,
+		tokenId: typedArgs.tokenId.toString(),
+		accountId: typedArgs.accountId,
 	}
 
 	runtime.log(`Updating position to inactive: ${JSON.stringify(payload)}`)
@@ -33,12 +36,12 @@ export const handlePositionMatured: EventHandlerFunction = (
 	const result = httpClient
 		.sendRequest(
 			runtime,
-			(sendRequester, cfg) => postToApi(sendRequester, (cfg as Config).novatedPositionsApi.url, payload),
+			(sendRequester, cfg) => postToApi(sendRequester, (cfg as Config).positionMaturedApi.url, payload),
 			consensusIdenticalAggregation<{ statusCode: number }>(),
 		)(config)
 		.result()
 
 	runtime.log(`Successfully updated position to inactive. Status: ${result.statusCode}`)
 
-	return { success: true, message: `Updated position ${typedArgs.tradeId} to inactive` }
+	return { success: true, message: `Updated position ${typedArgs.tokenId} to inactive` }
 }

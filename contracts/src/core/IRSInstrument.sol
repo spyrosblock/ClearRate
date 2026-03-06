@@ -38,6 +38,9 @@ contract IRSInstrument is ERC1155, AccessControl {
         Direction direction;       // PAY_FIXED or RECEIVE_FIXED
         bytes32 floatingRateIndex; // Identifier for floating rate (e.g. keccak256("SOFR"))
         uint8 dayCountConvention;  // 0=ACT/360, 1=ACT/365, 2=30/360
+        address collateralToken;   // Address of the collateral ERC-20 token used for margin and payments
+        bool active;               // Whether the swap is active
+        int256 lastNpv;           // Last Net Present Value (NPV) of the swap
     }
 
     // ─── State ──────────────────────────────────────────────────────────
@@ -54,10 +57,16 @@ contract IRSInstrument is ERC1155, AccessControl {
     // ─── Events ─────────────────────────────────────────────────────────
     event SwapPositionMinted(
         uint256 indexed tokenId,
-        address indexed to,
+        bytes32 indexed toId,
         uint256 notional,
         uint256 fixedRateBps,
-        Direction direction
+        uint256 startDate,
+        uint256 maturityDate,
+        uint256 paymentInterval,
+        Direction direction,
+        bytes32 floatingRateIndex,
+        uint8 dayCountConvention,
+        address collateralToken
     );
     event SwapPositionBurned(uint256 indexed tokenId, address indexed from, uint256 amount);
 
@@ -88,6 +97,7 @@ contract IRSInstrument is ERC1155, AccessControl {
     /// @return tokenId The newly minted token ID.
     function mintPosition(
         address to,
+        bytes32 toId,
         SwapTerms calldata terms
     ) external onlyRole(CLEARING_HOUSE_ROLE) returns (uint256 tokenId) {
         _validateTerms(terms);
@@ -100,10 +110,16 @@ contract IRSInstrument is ERC1155, AccessControl {
 
         emit SwapPositionMinted(
             tokenId,
-            to,
+            toId,
             terms.notional,
             terms.fixedRateBps,
-            terms.direction
+            terms.startDate,
+            terms.maturityDate,
+            terms.paymentInterval,
+            terms.direction,
+            terms.floatingRateIndex,
+            terms.dayCountConvention,
+            terms.collateralToken
         );
     }
 
@@ -135,6 +151,22 @@ contract IRSInstrument is ERC1155, AccessControl {
     ) external onlyRole(CLEARING_HOUSE_ROLE) {
         if (!tokenExists[tokenId]) revert TokenDoesNotExist(tokenId);
         _safeTransferFrom(from, to, tokenId, amount, "");
+    }
+
+    /// @notice Update the active status of a position (called during settlement).
+    /// @param tokenId The token ID to update.
+    /// @param active The new active status.
+    function setActiveStatus(uint256 tokenId, bool active) external onlyRole(CLEARING_HOUSE_ROLE) {
+        if (!tokenExists[tokenId]) revert TokenDoesNotExist(tokenId);
+        swapTerms[tokenId].active = active;
+    }
+
+    /// @notice Update the last NPV of a position (called during VM settlement).
+    /// @param tokenId The token ID to update.
+    /// @param npvChange The change in NPV to add.
+    function updateNpv(uint256 tokenId, int256 npvChange) external onlyRole(CLEARING_HOUSE_ROLE) {
+        if (!tokenExists[tokenId]) revert TokenDoesNotExist(tokenId);
+        swapTerms[tokenId].lastNpv += npvChange;
     }
 
     // ─── View Functions ─────────────────────────────────────────────────

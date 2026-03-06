@@ -13,13 +13,16 @@ export const configSchema = z.object({
 			gasLimit: z.string(),
 		}),
 	),
-	novatedPositionsApi: z.object({
+	novateTradeApi: z.object({
 		url: z.string(),
 	}),
 	liquidationMonitoringApi: z.object({
 		url: z.string(),
 	}),
 	absorbPositionsApi: z.object({
+		url: z.string(),
+	}),
+	positionMaturedApi: z.object({
 		url: z.string(),
 	}),
 })
@@ -41,7 +44,6 @@ export type GetResponse = {
 // ─── Database Payload Types ───────────────────────────────────────────────
 
 export type NovatedPositionPayload = {
-	action: 'TradeNovated'
 	tradeId: string
 	tokenIdA: string
 	tokenIdB: string
@@ -51,14 +53,17 @@ export type NovatedPositionPayload = {
 	fixedRateBps: string
 	startDate: string
 	maturityDate: string
+	paymentInterval: string
+	dayCountConvention: number
+	floatingRateIndex: string
 	active: boolean
 	lastNpv: string
 	collateralToken: string
 }
 
 export type PositionMaturedPayload = {
-	action: 'PositionMatured'
-	tradeId: string
+	tokenId: string
+	accountId: string
 }
 
 export type CreateMarginRecordPayload = {

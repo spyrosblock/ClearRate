@@ -16521,13 +16521,16 @@ var configSchema = exports_external.object({
     chainSelectorName: exports_external.string(),
     gasLimit: exports_external.string()
   })),
-  novatedPositionsApi: exports_external.object({
+  novateTradeApi: exports_external.object({
     url: exports_external.string()
   }),
   liquidationMonitoringApi: exports_external.object({
     url: exports_external.string()
   }),
   absorbPositionsApi: exports_external.object({
+    url: exports_external.string()
+  }),
+  positionMaturedApi: exports_external.object({
     url: exports_external.string()
   })
 });
@@ -16566,12 +16569,11 @@ var postToApi = (sendRequester, url, payload) => {
   }
   return { statusCode: resp.statusCode };
 };
-var handleTradeNovated = (context) => {
+var handleTradeNovated = async (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
   runtime2.log(`Event TradeNovated detected: tradeId ${typedArgs.tradeId} | tokenIdA ${typedArgs.tokenIdA} | tokenIdB ${typedArgs.tokenIdB} | partyA ${typedArgs.partyA} | partyB ${typedArgs.partyB} | collateralToken ${typedArgs.collateralToken}`);
   const payload = {
-    action: "TradeNovated",
     tradeId: typedArgs.tradeId,
     tokenIdA: typedArgs.tokenIdA.toString(),
     tokenIdB: typedArgs.tokenIdB.toString(),
@@ -16581,29 +16583,32 @@ var handleTradeNovated = (context) => {
     fixedRateBps: typedArgs.fixedRateBps.toString(),
     startDate: typedArgs.startDate.toString(),
     maturityDate: typedArgs.maturityDate.toString(),
+    paymentInterval: typedArgs.paymentInterval.toString(),
+    dayCountConvention: typedArgs.dayCountConvention,
+    floatingRateIndex: typedArgs.floatingRateIndex,
     active: true,
     lastNpv: "0",
     collateralToken: typedArgs.collateralToken
   };
   runtime2.log(`Storing novated position: ${JSON.stringify(payload)}`);
   const httpClient = new cre.capabilities.HTTPClient;
-  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.novatedPositionsApi.url, payload), consensusIdenticalAggregation())(config).result();
+  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.novateTradeApi.url, payload), consensusIdenticalAggregation())(config).result();
   runtime2.log(`Successfully stored novated trade. Status: ${result.statusCode}`);
   return { success: true, message: `Stored novated trade ${typedArgs.tradeId}` };
 };
 var handlePositionMatured = (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
-  runtime2.log(`Event PositionMatured detected: tradeId ${typedArgs.tradeId} | timestamp ${typedArgs.timestamp}`);
+  runtime2.log(`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | accountId ${typedArgs.accountId} | timestamp ${typedArgs.timestamp}`);
   const payload = {
-    action: "PositionMatured",
-    tradeId: typedArgs.tradeId
+    tokenId: typedArgs.tokenId.toString(),
+    accountId: typedArgs.accountId
   };
   runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
   const httpClient = new cre.capabilities.HTTPClient;
-  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.novatedPositionsApi.url, payload), consensusIdenticalAggregation())(config).result();
+  const result = httpClient.sendRequest(runtime2, (sendRequester, cfg) => postToApi(sendRequester, cfg.positionMaturedApi.url, payload), consensusIdenticalAggregation())(config).result();
   runtime2.log(`Successfully updated position to inactive. Status: ${result.statusCode}`);
-  return { success: true, message: `Updated position ${typedArgs.tradeId} to inactive` };
+  return { success: true, message: `Updated position ${typedArgs.tokenId} to inactive` };
 };
 var handleMarginDeposited = (context) => {
   const { runtime: runtime2, args, config } = context;
@@ -16749,7 +16754,7 @@ var executeHandler = async (eventName, context) => {
 };
 var eventAbi = parseAbi([
   "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
-  "event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)",
+  "event PositionMatured(uint256 indexed tokenId, bytes32 accountId, uint256 timestamp)",
   "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
   "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
   "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)",

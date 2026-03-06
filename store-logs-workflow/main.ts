@@ -16,7 +16,7 @@ import { isRegisteredEvent, executeHandler, type EventName } from './event-handl
 // Full event ABI matching the IClearingHouse.sol, MarginVault.sol, RiskEngine.sol, and LiquidationEngine.sol contracts
 const eventAbi = parseAbi([
 	'event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)',
-	'event PositionMatured(bytes32 indexed tradeId, uint256 timestamp)',
+	'event PositionMatured(uint256 indexed tokenId, bytes32 accountId, uint256 timestamp)',
 	'event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)',
 	'event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)',
 	'event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)',

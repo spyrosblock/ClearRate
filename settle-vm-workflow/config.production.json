@@ -11,9 +11,6 @@
     "apiEndpoint": "https://clear-rate.vercel.app/api/variation-margin",
     "fallbackEnabled": false
   },
-  "novatedPositions": {
-    "apiEndpoint": "https://clear-rate.vercel.app/api/novated-positions"
-  },
   "updateTotalCollateral": {
     "apiEndpoint": "https://clear-rate.vercel.app/api/liquidation-monitoring/update-total-collateral"
   }

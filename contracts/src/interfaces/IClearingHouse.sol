@@ -24,58 +24,22 @@ interface IClearingHouse {
         address collateralToken;   // Single collateral token for IM and VM
     }
 
-    /// @notice A novated position record.
-    struct NovatedPosition {
-        bytes32 tradeId;
-        uint256 tokenIdA;           // ERC-1155 token ID for party A's leg
-        uint256 tokenIdB;           // ERC-1155 token ID for party B's leg
-        bytes32 partyA;
-        bytes32 partyB;
-        uint256 notional;           // Current notional (may be reduced after compression)
-        uint256 fixedRateBps;
-        uint256 startDate;
-        uint256 maturityDate;
-        bool active;
-        int256 lastNpv;             // Last mark-to-market NPV
-        address collateralToken;    // Single collateral token for IM and VM
-    }
-
     /// @notice Variation margin settlement batch entry.
+    /// @dev Each settlement is for a specific account. The vmChange is aggregated across all positions for the account.
     struct VMSettlement {
-        bytes32 tradeId;            // Unique trade identifier
-        int256 npvChange;           // NPV change from the fixed payer's perspective
+        bytes32 accountId;
+        address collateralToken;
+        int256 vmChange;
     }
-
-    /// @notice Matured position settlement entry.
-    struct MaturedPositionSettlement {
-        bytes32 tradeId;            // Unique trade identifier
-        int256 finalNpvChange;     // Final NPV change to settle (from fixed payer's perspective)
-    }
-
-    /// @notice New compressed position to be created during compression.
-    struct NewCompressedPosition {
-        bytes32 tradeId;           // New trade ID for the compressed position
-        bytes32 partyA;            // AccountId of party A (pays fixed)
-        bytes32 partyB;            // AccountId of party B (receives fixed)
-        uint256 notional;          // New notional amount (reduced)
-        uint256 fixedRateBps;      // Fixed rate in basis points
-        uint256 startDate;         // Swap effective date
-        uint256 maturityDate;      // Swap maturity date
-        uint256 paymentInterval;   // Payment frequency in seconds
-        uint8 dayCountConvention;  // Day-count convention
-        bytes32 floatingRateIndex; // Floating rate index identifier
-        address collateralToken;   // Collateral token for the position
+    
+    struct NPVChange {
+        uint256 tokenId;
+        int256 npvChange;
     }
 
     // ─── Events ─────────────────────────────────────────────────────────
 
-    event TradeSubmitted(
-        bytes32 indexed tradeId,
-        bytes32 indexed partyA,
-        bytes32 indexed partyB,
-        uint256 notional,
-        uint256 fixedRateBps
-    );
+    event TradeSubmitted(bytes32 indexed tradeId);
     event TradeNovated(
         bytes32 indexed tradeId,
         uint256 tokenIdA,
@@ -91,23 +55,22 @@ interface IClearingHouse {
         bytes32 floatingRateIndex,
         address collateralToken
     );
-    event VariationMarginSettled(
-        bytes32 indexed tradeId,
+    event NpvUpdated(
+        uint256 indexed tokenId,
         int256 npvChange,
         uint256 timestamp
     );
-    event PositionCompressed(
+    event AccountVariationMarginSettled(
         bytes32 indexed accountId,
-        bytes32 indexed tradeIdA,
-        bytes32 indexed tradeIdB,
-        uint256 notionalReduced
+        int256 vmChange,
+        uint256 timestamp
     );
-    event PositionMatured(bytes32 indexed tradeId, uint256 timestamp);
+    event PositionMatured(uint256 indexed tokenId, bytes32 accountId, uint256 timestamp);
     event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event PositionsTransferred(
         bytes32 indexed fromAccount,
         bytes32 indexed toAccount,
-        bytes32[] positionIds,
+        uint256[] tokenIds,
         address collateralToken
     );
 
@@ -121,12 +84,14 @@ interface IClearingHouse {
     error KycExpired(bytes32 accountId, uint64 expiry);
     error ExceedsMaxNotional(bytes32 accountId, uint256 requested, uint256 currentTotal, uint256 maxAllowed);
     error InsufficientMarginForTrade(bytes32 accountId);
-    error PositionNotActive(bytes32 tradeId);
-    error PositionNotMatured(bytes32 tradeId);
+    error PositionNotActive(uint256 tokenId);
+    error PositionNotMatured(uint256 tokenId);
+    error TokenDoesNotExist(uint256 tokenId);
     error InvalidNotional();
     error InvalidTradeTerms();
-    error NotPartyToTrade(bytes32 accountId, bytes32 tradeId);
+    error NotPartyToTrade(bytes32 accountId, uint256 tokenId);
     error PositionsNotCompressible();
     error InvalidReportType(uint8 reportType);
     error InvalidCollateralToken(address token);
+    error InsufficientTokenBalance(uint256 tokenId, uint256 requested, uint256 available);
 }

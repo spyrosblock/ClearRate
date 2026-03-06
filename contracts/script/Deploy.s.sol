@@ -8,7 +8,6 @@ import {MarginVault} from "../src/margin/MarginVault.sol";
 import {RiskEngine} from "../src/margin/RiskEngine.sol";
 import {IRSInstrument} from "../src/core/IRSInstrument.sol";
 import {ClearingHouse} from "../src/core/ClearingHouse.sol";
-import {InsuranceFund} from "../src/insurance/InsuranceFund.sol";
 import {LiquidationEngine} from "../src/liquidation/LiquidationEngine.sol";
 
 /// @title Deploy
@@ -105,11 +104,6 @@ contract Deploy is ClearRateScript {
         );
         logDeployment("ClearingHouse", address(clearingHouse));
 
-        // 6. Deploy InsuranceFund
-        console.log("\n[6/7] Deploying InsuranceFund...");
-        InsuranceFund insuranceFund = new InsuranceFund(deployer, tokens);
-        logDeployment("InsuranceFund", address(insuranceFund));
-
         // 7. Deploy LiquidationEngine
         console.log("\n[7/7] Deploying LiquidationEngine...");
         LiquidationEngine liquidationEngine = new LiquidationEngine(
@@ -118,7 +112,6 @@ contract Deploy is ClearRateScript {
             address(clearingHouse),
             address(riskEngine),
             address(marginVault),
-            address(insuranceFund),
             address(whitelist),
             AUCTION_DURATION,
             START_PREMIUM_BPS
@@ -152,11 +145,6 @@ contract Deploy is ClearRateScript {
         riskEngine.grantRole(RISK_ADMIN_ROLE, deployer);
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on RiskEngine");
 
-        // Grant roles to InsuranceFund
-        insuranceFund.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
-        insuranceFund.grantRole(FUND_MANAGER_ROLE, deployer);
-        console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on InsuranceFund");
-
         // Grant roles to LiquidationEngine
         liquidationEngine.grantRole(LIQUIDATOR_ROLE, deployer);
         console.log("- Granted LIQUIDATOR_ROLE to deployer on LiquidationEngine");
@@ -178,9 +166,9 @@ contract Deploy is ClearRateScript {
         //  DEPLOYMENT SUMMARY
         // ═══════════════════════════════════════════════════════════════
 
-        string[] memory names = new string[](7);
-        address[] memory addrs = new address[](7);
-        string[] memory envVars = new string[](7);
+        string[] memory names = new string[](6);
+        address[] memory addrs = new address[](6);
+        string[] memory envVars = new string[](6);
 
         names[0] = "# Whitelist";
         addrs[0] = address(whitelist);
@@ -197,12 +185,9 @@ contract Deploy is ClearRateScript {
         names[4] = "# Clearing House";
         addrs[4] = address(clearingHouse);
         envVars[4] = "CLEARING_HOUSE_ADDRESS";
-        names[5] = "# Insurance Fund";
-        addrs[5] = address(insuranceFund);
-        envVars[5] = "INSURANCE_FUND_ADDRESS";
-        names[6] = "# Liquidation Engine";
-        addrs[6] = address(liquidationEngine);
-        envVars[6] = "LIQUIDATION_ENGINE_ADDRESS";
+        names[5] = "# Liquidation Engine";
+        addrs[5] = address(liquidationEngine);
+        envVars[5] = "LIQUIDATION_ENGINE_ADDRESS";
 
         logAllDeployments(names, addrs, envVars);
 

@@ -1,34 +1,38 @@
--- 01-init.sql
--- Stores novated positions from ClearRate ClearingHouse
-
--- Novated positions table - mirrors NovatedPosition struct from IClearingHouse
-CREATE TABLE novated_positions (
-    id              SERIAL PRIMARY KEY,
-    trade_id        VARCHAR(66) UNIQUE NOT NULL,          -- bytes32 as hex string with '0x' prefix
-    token_id_a      VARCHAR(78) NOT NULL,                  -- uint256 as string (ERC-1155 token ID for party A)
-    token_id_b      VARCHAR(78) NOT NULL,                  -- uint256 as string (ERC-1155 token ID for party B)
-    party_a         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (pays fixed)
-    party_b         VARCHAR(66) NOT NULL,                  -- bytes32 account ID (receives fixed)
-    notional        NUMERIC(78, 0) NOT NULL,               -- Notional amount
-    fixed_rate_bps  INTEGER NOT NULL,                       -- Fixed rate in basis points
-    start_date      TIMESTAMPTZ NOT NULL,                  -- Swap effective date
-    maturity_date   TIMESTAMPTZ NOT NULL,                  -- Swap maturity date
-    active          BOOLEAN DEFAULT TRUE,                  -- Position active status
-    last_npv        NUMERIC(78, 0) DEFAULT 0,              -- Last mark-to-market NPV (int256)
-    collateral_token VARCHAR(42) NOT NULL,                  -- Single collateral token address for IM and VM
-    created_at      TIMESTAMPTZ DEFAULT NOW(),            -- Record creation timestamp
-    updated_at      TIMESTAMPTZ DEFAULT NOW()             -- Last update timestamp
+-- Swap positions table
+CREATE TABLE swap_positions (
+    id                    SERIAL PRIMARY KEY,
+    token_id              VARCHAR(78) NOT NULL,            -- uint256 as string (ERC-1155 token ID for party A)
+    owner_id              VARCHAR(66) NOT NULL,            -- bytes32 account ID (pays fixed)
+    balance               VARCHAR(78) NOT NULL,            -- Balance amount (int256 as string)
+    notional              NUMERIC(78, 0) NOT NULL,         -- Notional amount
+    fixed_rate_bps        INTEGER NOT NULL,                -- Fixed rate in basis points
+    start_date            TIMESTAMPTZ NOT NULL,            -- Swap effective date
+    maturity_date         TIMESTAMPTZ NOT NULL,            -- Swap maturity date
+    payment_interval      NUMERIC(78, 0) NOT NULL,         -- Payment interval in seconds
+    direction             INTEGER NOT NULL,                -- Direction of the swap (0 for PAY_FIXED, 1 for RECEIVE_FIXED)
+    floating_rate_index   VARCHAR(66) NOT NULL,            -- Floating rate index (bytes32 as hex string with '0x' prefix)
+    day_count_convention  INTEGER NOT NULL,                -- Day count convention (0=ACT/360, 1=ACT/365, 2=30/360)
+    collateral_token      VARCHAR(42) NOT NULL,            -- Single collateral token address for IM and VM
+    active                BOOLEAN DEFAULT TRUE,            -- Position active status
+    last_npv              NUMERIC(78, 0) DEFAULT 0,        -- Last mark-to-market NPV (int256)
+    created_at            TIMESTAMPTZ DEFAULT NOW(),       -- Record creation timestamp
+    updated_at            TIMESTAMPTZ DEFAULT NOW()        -- Last update timestamp
 );
 
--- Index for fast lookups by party
-CREATE INDEX idx_novated_positions_party_a ON novated_positions(party_a);
-CREATE INDEX idx_novated_positions_party_b ON novated_positions(party_b);
+-- Index for fast lookups by token_id
+CREATE INDEX idx_swap_positions_token_id ON swap_positions(token_id);
+
+-- Index for fast lookups by owner_id
+CREATE INDEX idx_swap_positions_owner_id ON swap_positions(owner_id);
 
 -- Index for active positions only
-CREATE INDEX idx_novated_positions_active ON novated_positions(active) WHERE active = TRUE;
+CREATE INDEX idx_swap_positions_active ON swap_positions(active) WHERE active = TRUE;
 
 -- Index for maturity date queries
-CREATE INDEX idx_novated_positions_maturity ON novated_positions(maturity_date);
+CREATE INDEX idx_swap_positions_maturity ON swap_positions(maturity_date);
+
+-- Unique constraint for token_id + owner_id combination (a token can have multiple owners)
+CREATE UNIQUE INDEX idx_swap_positions_token_owner ON swap_positions(token_id, owner_id);
 
 -- Users table - stores user KYB information and company details
 CREATE TABLE users (

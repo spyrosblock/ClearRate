@@ -9,13 +9,16 @@
       "gasLimit": "2000000"
     }
   ],
-  "novatedPositionsApi": {
+  "novateTradeApi": {
     "url": ""
   },
   "liquidationMonitoringApi": {
     "url": ""
   },
   "absorbPositionsApi": {
+    "url": ""
+  },
+  "positionMaturedApi": {
     "url": ""
   }
 }

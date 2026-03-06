@@ -22,9 +22,9 @@ export type TradeNovatedArgs = {
 
 // ─── Event Handler ───────────────────────────────────────────────────────────
 
-export const handleTradeNovated: EventHandlerFunction = (
+export const handleTradeNovated: EventHandlerFunction = async (
 	context: EventHandlerContext<DecodedLogArgs>,
-): EventHandlerResult => {
+): Promise<EventHandlerResult> => {
 	const { runtime, args, config } = context
 	// Cast args to the expected type for this handler
 	const typedArgs = args as TradeNovatedArgs
@@ -35,7 +35,6 @@ export const handleTradeNovated: EventHandlerFunction = (
 
 	// Prepare the payload with data from the event
 	const payload: NovatedPositionPayload = {
-		action: 'TradeNovated',
 		tradeId: typedArgs.tradeId,
 		tokenIdA: typedArgs.tokenIdA.toString(),
 		tokenIdB: typedArgs.tokenIdB.toString(),
@@ -45,6 +44,9 @@ export const handleTradeNovated: EventHandlerFunction = (
 		fixedRateBps: typedArgs.fixedRateBps.toString(),
 		startDate: typedArgs.startDate.toString(),
 		maturityDate: typedArgs.maturityDate.toString(),
+		paymentInterval: typedArgs.paymentInterval.toString(),
+		dayCountConvention: typedArgs.dayCountConvention,
+		floatingRateIndex: typedArgs.floatingRateIndex,
 		active: true,
 		lastNpv: '0', // Will be calculated by subsequent events
 		collateralToken: typedArgs.collateralToken,
@@ -57,7 +59,7 @@ export const handleTradeNovated: EventHandlerFunction = (
 	const result = httpClient
 		.sendRequest(
 			runtime,
-			(sendRequester, cfg) => postToApi(sendRequester, (cfg as Config).novatedPositionsApi.url, payload),
+			(sendRequester, cfg) => postToApi(sendRequester, (cfg as Config).novateTradeApi.url, payload),
 			consensusIdenticalAggregation<{ statusCode: number }>(),
 		)(config)
 		.result()

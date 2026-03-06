@@ -8,7 +8,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ClearingHouse} from "../core/ClearingHouse.sol";
 import {RiskEngine} from "../margin/RiskEngine.sol";
 import {MarginVault} from "../margin/MarginVault.sol";
-import {InsuranceFund} from "../insurance/InsuranceFund.sol";
 import {Whitelist} from "../access/Whitelist.sol";
 import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 
@@ -53,9 +52,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
     /// @notice Reference to the MarginVault.
     MarginVault public immutable marginVault;
-
-    /// @notice Reference to the InsuranceFund.
-    InsuranceFund public immutable insuranceFund;
 
     /// @notice Reference to the Whitelist.
     Whitelist public immutable whitelist;
@@ -107,7 +103,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     /// @param clearingHouse_ The ClearingHouse contract address.
     /// @param riskEngine_ The RiskEngine contract address.
     /// @param marginVault_ The MarginVault contract address.
-    /// @param insuranceFund_ The InsuranceFund contract address.
     /// @param whitelist_ The Whitelist contract address.
     /// @param auctionDuration_ Default auction duration in seconds.
     /// @param startPremium_ Default starting premium in BPS.
@@ -117,7 +112,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         address clearingHouse_,
         address riskEngine_,
         address marginVault_,
-        address insuranceFund_,
         address whitelist_,
         uint256 auctionDuration_,
         uint256 startPremium_
@@ -127,7 +121,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         clearingHouse = ClearingHouse(clearingHouse_);
         riskEngine = RiskEngine(riskEngine_);
         marginVault = MarginVault(marginVault_);
-        insuranceFund = InsuranceFund(insuranceFund_);
         whitelist = Whitelist(whitelist_);
 
         if (auctionDuration_ == 0) revert InvalidDuration();
@@ -208,34 +201,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
         emit PositionsAbsorbed(accountId, collateralToken, liquidatorAccountId, premium);
     }
-
-    /// @notice Resolve an expired auction by tapping the insurance fund.
-    /// @dev If no liquidator stepped in, the insurance fund covers the deficit.
-    /// @param accountId The account whose auction expired.
-    /// @param token The stablecoin token to use from the insurance fund.
-    // function resolveExpiredAuction(
-    //     bytes32 accountId,
-    //     address token
-    // ) external onlyRole(CLEARING_HOUSE_ROLE) {
-    //     Auction storage auction = auctions[accountId];
-    //     if (!auction.active) revert NoActiveAuction(accountId);
-
-    //     uint256 elapsed = block.timestamp - auction.startTime;
-    //     if (elapsed <= auction.duration) {
-    //         // Auction hasn't expired yet — can still be absorbed
-    //         revert AuctionAlreadyActive(accountId);
-    //     }
-
-    //     auction.active = false;
-    //     auction.resolved = true;
-
-    //     // Tap insurance fund for the remaining deficit
-    //     if (auction.debtAmount > 0) {
-    //         insuranceFund.claimDeficit(token, address(marginVault), auction.debtAmount);
-    //     }
-
-    //     emit AuctionResolved(accountId, true);
-    // }
 
     // ─── Admin Functions ────────────────────────────────────────────────
 

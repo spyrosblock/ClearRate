@@ -32,9 +32,6 @@ const configSchema = z.object({
 		apiEndpoint: z.string(),
 		fallbackEnabled: z.boolean(),
 	}).optional(),
-	novatedPositions: z.object({
-		apiEndpoint: z.string(),
-	}).optional(),
 	updateTotalCollateral: z.object({
 		apiEndpoint: z.string(),
 	}).optional(),
@@ -51,11 +48,18 @@ type Config = z.infer<typeof configSchema>
  * Example API response:
  * ```json
  * {
- *   "settlements": [
+ *   "npvChanges": [
  *     {
- *       "tradeId": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+ *       "tokenId": "1234567890abcdef...",
  *       "npvChange": "1000000000000000000",
  *       "isFinal": false
+ *     }
+ *   ],
+ *   "vmSettlements": [
+ *     {
+ *       "accountId": "0x...",
+ *       "collateralToken": "0x...",
+ *       "vmChange": "1000000000000000000"
  *     }
  *   ],
  *   "metadata": {
@@ -65,16 +69,23 @@ type Config = z.infer<typeof configSchema>
  * }
  * ```
  * 
- * - tradeId: bytes32 hex string (64 characters, may include 0x prefix)
+ * - tokenId: uint256 as string (ERC-1155 token ID)
  * - npvChange: string representation of int256 (positive = NPV increased from fixed payer's perspective)
  * - isFinal: boolean indicating if this is a final matured position settlement (true) or regular VM settlement (false)
  */
 const vmSettlementPayloadSchema = z.object({
-	settlements: z.array(
+	npvChanges: z.array(
 		z.object({
-			tradeId: z.string(),
+			tokenId: z.string(),
 			npvChange: z.string(), // Can be positive or negative
 			isFinal: z.boolean(), // true = matured position settlement, false = regular VM
+		}),
+	),
+	vmSettlements: z.array(
+		z.object({
+			accountId: z.string(),
+			collateralToken: z.string(),
+			vmChange: z.string(),
 		}),
 	),
 	metadata: z
@@ -144,147 +155,28 @@ const toBigIntSafe = (value: string): bigint => {
 	return isNegative ? -result : result
 }
 
-// ─── Position Data from novated_positions API ───────────────────────────────
+// ─── VM Settlement Data Fetching ────────────────────────────────────────────
 
 /**
- * Position data structure from the novated_positions API/database.
- */
-interface PositionData {
-	tradeId: string
-	tokenIdA: string
-	tokenIdB: string
-	partyA: string
-	partyB: string
-	notional: string
-	fixedRateBps: string
-	startDate: string
-	maturityDate: string
-	active: boolean
-	lastNpv: string
-	collateralToken: string
-}
-
-/**
- * Schema for validating the novated_positions API response.
- */
-const novatedPositionsResponseSchema = z.array(
-	z.object({
-		id: z.number(),
-		trade_id: z.string(),
-		token_id_a: z.string(),
-		token_id_b: z.string(),
-		party_a: z.string(),
-		party_b: z.string(),
-		notional: z.string(),
-		fixed_rate_bps: z.number(),
-		start_date: z.string(),
-		maturity_date: z.string(),
-		active: z.boolean(),
-		last_npv: z.string(),
-		collateral_token: z.string(),
-		created_at: z.string().optional(),
-		updated_at: z.string().optional(),
-	}),
-)
-
-
-/**
- * Response wrapper for positions to enable proper consensus aggregation.
- */
-interface PositionsResponse {
-	positions: PositionData[]
-	count: number
-}
-
-/**
- * Fetch all positions from the novated_positions API.
- * This function retrieves positions from the database via the Next.js API route.
- * Only active positions are included in the VM settlement calculation.
- */
-const fetchPositionsFromAPI = (
-	runtime: Runtime<Config>,
-	sendRequester: HTTPSendRequester,
-	config: Config,
-): PositionsResponse => {
-	if (!config.novatedPositions?.apiEndpoint) {
-		throw new Error('Novated Positions API endpoint is not configured')
-	}
-
-	runtime.log(`Fetching positions from: ${config.novatedPositions.apiEndpoint}`)
-
-	const response = sendRequester.sendRequest({
-		method: 'GET',
-		url: config.novatedPositions.apiEndpoint,
-	}).result()
-
-	console.log('[DEBUG] Novated Positions API response status:', response.statusCode)
-	console.log('[DEBUG] Novated Positions API response body:', JSON.stringify(response.body))
-
-	if (response.statusCode !== 200) {
-		throw new Error(`Novated Positions API request failed with status: ${response.statusCode}`)
-	}
-
-	const responseText = Buffer.from(response.body).toString('utf-8')
-	console.log('[DEBUG] Novated Positions API response text:', responseText)
-	
-	const data = JSON.parse(responseText)
-
-	// Validate the response
-	const parsedData = novatedPositionsResponseSchema.parse(data)
-
-	// Transform API response to PositionData format and filter for active positions only
-	const positions: PositionData[] = parsedData
-		.filter((pos) => pos.active)
-		.map((pos) => ({
-			tradeId: pos.trade_id,
-			tokenIdA: pos.token_id_a,
-			tokenIdB: pos.token_id_b,
-			partyA: pos.party_a,
-			partyB: pos.party_b,
-			notional: pos.notional,
-			fixedRateBps: pos.fixed_rate_bps.toString(),
-			startDate: pos.start_date,
-			maturityDate: pos.maturity_date,
-			active: pos.active,
-			lastNpv: pos.last_npv,
-			collateralToken: pos.collateral_token,
-		}))
-
-	runtime.log(`Found ${positions.length} active positions from novated_positions API`)
-
-	// Return wrapped response for proper consensus aggregation
-	return {
-		positions,
-		count: positions.length,
-	}
-}
-
-// ─── VM Settlement Data Fetching with Positions ────────────────────────────
-
-/**
- * Send positions to the API and receive VM settlement data.
+ * Fetch VM settlement data from the API.
  * This function is executed by each DON node independently;
  * results are aggregated via median consensus.
+ * 
+ * The API now queries positions internally, so no need to pass them.
  */
-const fetchVMSettlementDataWithPositions = (
+const fetchVMSettlement = (
 	sendRequester: HTTPSendRequester,
 	config: Config,
-	positions: PositionData[],
 ): ValidatedVMSettlementPayload => {
 	if (!config.vmSettlement?.apiEndpoint) {
 		throw new Error('VM Settlement API endpoint is not configured')
 	}
 
-	// Send positions to the API via POST
-	// Body must be base64 encoded for CRE SDK
-	const requestBody = JSON.stringify({
-		positions,
-		settlementDate: new Date().toISOString().split('T')[0],
-	})
+	// Call the API via POST (no positions needed - API queries them internally)
 	const response = sendRequester.sendRequest({
 		method: 'POST',
 		url: config.vmSettlement.apiEndpoint,
-		body: Buffer.from(requestBody).toString('base64'),
+		body: Buffer.from(JSON.stringify({})).toString('base64'),
 		headers: {
 			'Content-Type': 'application/json',
 		},
@@ -308,104 +200,39 @@ const fetchVMSettlementDataWithPositions = (
 // ─── Update Total Collateral after Settlement ─────────────────────────────
 
 /**
- * Collateral update data for an account.
- */
-interface CollateralUpdate {
-	accountId: string
-	collateralToken: string
-	npvChange: bigint
-}
-
-/**
  * Update total collateral for accounts after VM settlement.
  * 
- * For each settlement:
- * - Positive npvChange: partyA (fixed payer) gains, partyB loses
- * - Negative npvChange: partyA loses, partyB gains
- * 
- * This function aggregates changes by (accountId, collateralToken) and calls
- * the update-total-collateral API for each unique combination.
+ * Uses the vmSettlements array from the API response, which already contains
+ * aggregated VM changes by account and collateral token.
  */
 const updateTotalCollateral = (
 	runtime: Runtime<Config>,
 	sendRequester: HTTPSendRequester,
 	config: Config,
-	positions: PositionData[],
-	settlements: ValidatedVMSettlementPayload['settlements'],
+	vmSettlements: ValidatedVMSettlementPayload['vmSettlements'],
 ): void => {
 	if (!config.updateTotalCollateral?.apiEndpoint) {
 		runtime.log('Update Total Collateral API endpoint not configured, skipping collateral update')
 		return
 	}
 
-	// Create a map of tradeId -> position for lookup
-	const positionMap = new Map<string, PositionData>()
-	for (const pos of positions) {
-		positionMap.set(pos.tradeId, pos)
+	if (vmSettlements.length === 0) {
+		runtime.log('No VM settlements to process for collateral update')
+		return
 	}
 
-	// Aggregate collateral changes by (accountId, collateralToken)
-	const collateralChanges = new Map<string, CollateralUpdate>()
+	runtime.log(`Updating collateral for ${vmSettlements.length} account/token combinations`)
 
-	for (const settlement of settlements) {
-		const position = positionMap.get(settlement.tradeId)
-		if (!position) {
-			runtime.log(`Warning: Position not found for tradeId ${settlement.tradeId}`)
-			continue
-		}
+	// Call update-total-collateral API for each vmSettlement entry
+	for (const settlement of vmSettlements) {
+		runtime.log(`  Account: ${settlement.accountId}`)
+		runtime.log(`  Token: ${settlement.collateralToken}`)
+		runtime.log(`  VM Change: ${settlement.vmChange}`)
 
-		const npvChange = toBigIntSafe(settlement.npvChange)
-
-		// PartyA (fixed payer) gains/loses based on npvChange sign
-		// Positive npvChange = NPV increased from fixed payer's perspective = partyA gains
-		const partyAKey = `${position.partyA}:${position.collateralToken}`
-		const existingPartyA = collateralChanges.get(partyAKey)
-		if (existingPartyA) {
-			existingPartyA.npvChange += npvChange
-		} else {
-			collateralChanges.set(partyAKey, {
-				accountId: position.partyA,
-				collateralToken: position.collateralToken,
-				npvChange: npvChange,
-			})
-		}
-
-		// PartyB (fixed receiver) has opposite change
-		const partyBKey = `${position.partyB}:${position.collateralToken}`
-		const existingPartyB = collateralChanges.get(partyBKey)
-		if (existingPartyB) {
-			existingPartyB.npvChange -= npvChange
-		} else {
-			collateralChanges.set(partyBKey, {
-				accountId: position.partyB,
-				collateralToken: position.collateralToken,
-				npvChange: -npvChange,
-			})
-		}
-	}
-
-	runtime.log(`Updating collateral for ${collateralChanges.size} account/token combinations`)
-
-	// Call update-total-collateral API for each account
-	for (const [key, update] of collateralChanges) {
-		// For updating total collateral, we need to calculate the new total
-		// The API expects the new total collateral value, but we only have the change
-		// We need to first fetch the current total collateral, then add the change
-		
-		// Since we only have the change, we'll need to pass the npvChange to the API
-		// But the update-total-collateral API expects the new total, not the change
-		// For now, we'll just log the change (the API may need modification)
-		runtime.log(`  Account: ${update.accountId}`)
-		runtime.log(`  Token: ${update.collateralToken}`)
-		runtime.log(`  NPV Change: ${update.npvChange.toString()}`)
-
-		// Send request to update the total collateral
-		// Note: The API currently expects the new total, so we need to adjust
-		// For now, we'll send the npvChange and let the API handle it
 		const requestBody = JSON.stringify({
-			accountId: update.accountId,
-			collateralToken: update.collateralToken,
-			npvChange: update.npvChange.toString(),
+			accountId: settlement.accountId,
+			collateralToken: settlement.collateralToken,
+			npvChange: settlement.vmChange,
 		})
 
 		const response = sendRequester.sendRequest({
@@ -419,9 +246,9 @@ const updateTotalCollateral = (
 
 		if (response.statusCode !== 200) {
 			const responseText = Buffer.from(response.body).toString('utf-8')
-			runtime.log(`Warning: Failed to update collateral for ${update.accountId}: ${responseText}`)
+			runtime.log(`Warning: Failed to update collateral for ${settlement.accountId}: ${responseText}`)
 		} else {
-			runtime.log(`  Successfully updated collateral for ${update.accountId}`)
+			runtime.log(`  Successfully updated collateral for ${settlement.accountId}`)
 		}
 	}
 }
@@ -457,15 +284,15 @@ const writeVMSettlement = (
 	// TODO remove this testing line in prod
 	// the api is mocked and returns positions with isFinal set to false
 	// so if you can use the final-config.staging.json file to test final settlements
-	if (runtime.config.isFinal) payload.settlements.forEach(s => s.isFinal = true);
+	if (runtime.config.isFinal) payload.npvChanges.forEach(s => s.isFinal = true);
 	runtime.log(`Config: isFinal=${runtime.config.isFinal}`)
 
 	// Separate settlements into VM (regular) and matured (final) based on isFinal flag
-	const vmSettlements = payload.settlements.filter((s) => !s.isFinal)
-	const maturedSettlements = payload.settlements.filter((s) => s.isFinal)
+	const vmSettlements = payload.npvChanges.filter((s) => !s.isFinal)
+	const maturedSettlements = payload.npvChanges.filter((s) => s.isFinal)
 
 	runtime.log(
-		`Settling ${payload.settlements.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
+		`Settling ${payload.npvChanges.length} trades on ClearingHouse at ${evmConfig.clearingHouseAddress}`,
 	)
 	runtime.log(`  - VM settlements (non-final): ${vmSettlements.length}`)
 	runtime.log(`  - Matured position settlements (final): ${maturedSettlements.length}`)
@@ -477,25 +304,33 @@ const writeVMSettlement = (
 		// Log each VM settlement
 		for (let i = 0; i < vmSettlements.length; i++) {
 			const s = vmSettlements[i]
-			runtime.log(`  VM Settlement ${i + 1}: ${toBytes32(s.tradeId)} -> ${s.npvChange}`)
+			runtime.log(`  VM Settlement ${i + 1}: Token ${s.tokenId} -> ${s.npvChange}`)
 		}
 
-		// ABI-encode the VM settlement data as (uint8, VMSettlement[])
+		// ABI-encode the VM settlement data as (uint8, NPVChange[], VMSettlement[])
 		// ReportType = 1 indicates VM settlement
-		// Use struct array encoding to match Solidity contract decoding
+		// The contract expects BOTH npvChanges AND vmSettlements arrays
 		const vmSettlementParams = parseAbiParameters(
-			'uint8,(bytes32 tradeId, int256 npvChange)[]',
+			'uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[]',
 		)
 
-		// Create struct array as array of objects
-		const settlements = vmSettlements.map((s) => ({
-			tradeId: toBytes32(s.tradeId),
+		// Create NPVChange struct array
+		const npvChangeArray = vmSettlements.map((s) => ({
+			tokenId: toBigIntSafe(s.tokenId),
 			npvChange: toBigIntSafe(s.npvChange),
+		}))
+
+		// Create VMSettlement struct array from the API response
+		const vmSettlementArray = payload.vmSettlements.map((s) => ({
+			accountId: toBytes32(s.accountId),
+			collateralToken: s.collateralToken as Address,
+			vmChange: toBigIntSafe(s.vmChange),
 		}))
 
 		const reportData = encodeAbiParameters(vmSettlementParams, [
 			1, // Report type: 1 = VM settlement
-			settlements,
+			npvChangeArray,
+			vmSettlementArray,
 		])
 
 		runtime.log(`Encoded VM report data: ${reportData}`)
@@ -534,25 +369,33 @@ const writeVMSettlement = (
 		// Log each matured settlement
 		for (let i = 0; i < maturedSettlements.length; i++) {
 			const s = maturedSettlements[i]
-			runtime.log(`  Matured Settlement ${i + 1}: ${toBytes32(s.tradeId)} -> ${s.npvChange}`)
+			runtime.log(`  Matured Settlement ${i + 1}: Token ${s.tokenId} -> ${s.npvChange}`)
 		}
 
-		// ABI-encode the matured position settlement data as (uint8, MaturedPositionSettlement[])
+		// ABI-encode the matured position settlement data as (uint8, NPVChange[], VMSettlement[])
 		// ReportType = 2 indicates matured position settlement
-		// Use struct array encoding to match Solidity contract decoding
+		// The contract expects BOTH npvChanges AND vmSettlements arrays
 		const maturedSettlementParams = parseAbiParameters(
-			'uint8, (bytes32 tradeId, int256 npvChange)[]',
+			'uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[]',
 		)
 
-		// Create struct array as array of objects
-		const settlements = maturedSettlements.map((s) => ({
-			tradeId: toBytes32(s.tradeId),
+		// Create NPVChange struct array
+		const npvChangeArray = maturedSettlements.map((s) => ({
+			tokenId: toBigIntSafe(s.tokenId),
 			npvChange: toBigIntSafe(s.npvChange),
+		}))
+
+		// Create VMSettlement struct array from the API response
+		const vmSettlementArray = payload.vmSettlements.map((s) => ({
+			accountId: toBytes32(s.accountId),
+			collateralToken: s.collateralToken as Address,
+			vmChange: toBigIntSafe(s.vmChange),
 		}))
 
 		const reportData = encodeAbiParameters(maturedSettlementParams, [
 			2, // Report type: 2 = Matured position settlement
-			settlements,
+			npvChangeArray,
+			vmSettlementArray,
 		])
 
 		runtime.log(`Encoded matured position report data: ${reportData}`)
@@ -586,7 +429,7 @@ const writeVMSettlement = (
 		runtime.log(`Matured position settlement submitted successfully! TxHash: ${txHash}`)
 	}
 
-	if (payload.settlements.length === 0) {
+	if (payload.npvChanges.length === 0) {
 		runtime.log('No settlements to process')
 	}
 
@@ -598,9 +441,9 @@ const writeVMSettlement = (
 
 /**
  * Core workflow execution:
- * 1. Fetch all active positions from novated_positions API
- * 2. Send positions to VM settlement API for NPV calculation (with DON consensus)
- * 3. Write VM settlement to ClearingHouse contract onchain
+ * 1. Fetch VM settlement data from the API (API queries positions internally)
+ * 2. Write VM settlement to ClearingHouse contract onchain
+ * 3. Update total collateral for affected accounts
  */
 const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 	runtime.log('=== VM Settlement Workflow Started ===')
@@ -608,70 +451,38 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 	const evmConfig = runtime.config.evms[0]
 	const httpCapability = new HTTPClient()
 
-	// ── Step 1: Fetch positions from novated_positions API ────────────────
-	runtime.log('Fetching positions from novated_positions API...')
+	// ── Step 1: Fetch VM Settlement Data from API ─────────────────────────
+	runtime.log(`Fetching VM settlement data from API: ${runtime.config.vmSettlement?.apiEndpoint}`)
 	
-	let positions: PositionData[]
-	
-	// Check if novatedPositions API endpoint is configured
-	if (runtime.config.novatedPositions?.apiEndpoint) {
-		// Use consensus aggregation for fetching positions (each DON node fetches independently)
-		const positionsResponse = httpCapability
-			.sendRequest(
-				runtime,
-				(sendRequester, config) => fetchPositionsFromAPI(runtime, sendRequester, config as Config),
-				ConsensusAggregationByFields<PositionsResponse>({
-					// Use median for consensus on count
-					count: median,
-					// Use median for positions array aggregation
-					positions: median as any,
-				}),
-			)(runtime.config)
-			.result() as PositionsResponse
-
-		positions = positionsResponse.positions
-	} else {
-		// Fallback: No novatedPositions API configured, throw error
-		throw new Error('Novated Positions API endpoint is not configured')
-	}
-
-	runtime.log(`Fetched ${positions.length} active positions from novated_positions API`)
-
-	// ── Step 2: Send positions to VM Settlement API for NPV calculation ───
-	let vmSettlementData: ValidatedVMSettlementPayload
-
-		runtime.log(`Sending positions to VM Settlement API: ${runtime.config.vmSettlement?.apiEndpoint}`)
-		
-		// Use median for aggregation
-		vmSettlementData = httpCapability
-			.sendRequest(
-				runtime,
-				(sendRequester, config) => fetchVMSettlementDataWithPositions(sendRequester, config as Config, positions),
-				ConsensusAggregationByFields({
-					settlements: median as any,
-					metadata: median as any,
-				}),
-			)(runtime.config)
-			.result() as ValidatedVMSettlementPayload
-
+	const vmSettlementData = httpCapability
+		.sendRequest(
+			runtime,
+			(sendRequester, config) => fetchVMSettlement(sendRequester, config as Config),
+			ConsensusAggregationByFields({
+				npvChanges: median as any,
+				vmSettlements: median as any,
+				metadata: median as any,
+			}),
+		)(runtime.config)
+		.result() as ValidatedVMSettlementPayload
 
 	runtime.log(`VM Settlement Data: ${JSON.stringify(vmSettlementData)}`)
 	
-	if (!vmSettlementData || !vmSettlementData.settlements) {
-		throw new Error('Failed to fetch VM settlement data or empty settlements returned')
+	if (!vmSettlementData || !vmSettlementData.npvChanges) {
+		throw new Error('Failed to fetch VM settlement data or empty npvChanges returned')
 	}
 
-	// ── Step 3: Write VM settlement onchain ─────────────────────────────
+	// ── Step 2: Write VM settlement onchain ─────────────────────────────
 	runtime.log('Writing VM settlement to ClearingHouse...')
 	const txHash = writeVMSettlement(runtime, evmConfig, vmSettlementData)
 
-	// ── Step 4: Update total collateral in liquidation monitoring ───────
+	// ── Step 3: Update total collateral in liquidation monitoring ───────
 	runtime.log('Updating total collateral for settled accounts...')
 	httpCapability
 		.sendRequest(
 			runtime,
 			(sendRequester, config) => {
-				updateTotalCollateral(runtime, sendRequester, config as Config, positions, vmSettlementData.settlements)
+				updateTotalCollateral(runtime, sendRequester, config as Config, vmSettlementData.vmSettlements)
 				return { success: true }
 			},
 			ConsensusAggregationByFields({
@@ -681,7 +492,7 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 		.result()
 
 	runtime.log('=== VM Settlement Workflow Completed ===')
-	runtime.log(`Trades settled: ${vmSettlementData.settlements.length} | TxHash: ${txHash}`)
+	runtime.log(`Trades settled: ${vmSettlementData.npvChanges.length} | TxHash: ${txHash}`)
 
 	return txHash
 }
