@@ -60,8 +60,8 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @notice Trade IDs that have been submitted (prevents double-submission).
     mapping(bytes32 => bool) public tradeSubmitted;
 
-    /// @notice Total number of active positions.
-    uint256 public activePositionCount;
+    /// @notice Total number of positions.
+    uint256 public positionCount;
 
     /// @notice Protocol fee in BPS charged on notional per trade.
     uint256 public protocolFeeBps;
@@ -179,13 +179,13 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
             _executeVMSettlement(npvChanges, vmSettlements);
         } else if (reportType == 2) {
             // Matured position settlement batch report
-            // Decode: (uint8, NPVChange[] npvChanges, VMSettlement[] vmSettlements)
-            // All tokenIds in npvChanges will be deactivated after settlement
-            (, NPVChange[] memory npvChanges, VMSettlement[] memory vmSettlements) = abi.decode(
+            // Decode: (uint8, NPVChange[] npvChanges, VMSettlement[] vmSettlements, MaturedPosition[] maturedPositions)
+            // All positions in maturedPositions will be closed after settlement
+            (, NPVChange[] memory npvChanges, VMSettlement[] memory vmSettlements, MaturedPosition[] memory maturedPositions) = abi.decode(
                 report,
-                (uint8, NPVChange[], VMSettlement[])
+                (uint8, NPVChange[], VMSettlement[], MaturedPosition[])
             );
-            _executeMaturedPositionSettlement(npvChanges, vmSettlements);
+            _executeMaturedPositionSettlement(npvChanges, vmSettlements, maturedPositions);
         } else {
             revert InvalidReportType(reportType);
         }
@@ -374,7 +374,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         accountTokenIds[trade.partyA][trade.collateralToken].push(tokenIdA);
         accountTokenIds[trade.partyB][trade.collateralToken].push(tokenIdB);
 
-        ++activePositionCount;
+        ++positionCount;
 
         emit TradeNovated(
             trade.tradeId,
@@ -456,11 +456,13 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     // ─── Internal: Position Settlement ─────────────────────────────────
 
     /// @dev Execute matured position settlement for a batch of positions.
-    /// @param npvChanges Array of NPV changes per token. All tokens in this array will be deactivated.
+    /// @param npvChanges Array of NPV changes per token.
     /// @param vmSettlements Array of VM settlement entries per account.
+    /// @param maturedPositions Array of matured positions to close.
     function _executeMaturedPositionSettlement(
         NPVChange[] memory npvChanges,
-        VMSettlement[] memory vmSettlements
+        VMSettlement[] memory vmSettlements,
+        MaturedPosition[] memory maturedPositions
     ) internal {
         // Step 1: Update NPV for each token
         for (uint256 i; i < npvChanges.length; ++i) {
@@ -474,16 +476,24 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
             _settleAccountVariationMargin(settlement.accountId, settlement.collateralToken, settlement.vmChange);
         }
 
-        // Step 3: Close all matured positions (all tokenIds in npvChanges)
+        // Step 3: Close matured positions
+        for (uint256 i; i < maturedPositions.length; ++i) {
+            _closeMaturedPosition(maturedPositions[i].accountId, maturedPositions[i].tokenId);
+        }
+
+        // Step 4: Set active=false for each tokenId
         for (uint256 i; i < npvChanges.length; ++i) {
-            uint256 tokenId = npvChanges[i].tokenId;
-            _closeMaturedPosition(tokenId);
+            NPVChange memory pos = npvChanges[i];
+            instrument.setActiveStatus(pos.tokenId, false);
+            emit PositionMatured(pos.tokenId, block.timestamp);
         }
     }
 
     /// @dev Close a matured position and release locked margin.
+    /// @param accountId The account that holds the position.
     /// @param tokenId The token that has matured.
     function _closeMaturedPosition(
+        bytes32 accountId,
         uint256 tokenId
     ) internal {
         // Get position data from IRSInstrument
@@ -494,24 +504,55 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         // TODO: enable this in production
         // if (block.timestamp < terms.maturityDate) revert PositionNotMatured(tokenId);
 
-        // Get the token balance - we need to find who holds this token
-        // Since this is an ERC-1155, we need to track holders separately or iterate
-        // For now, we'll close the position for the original account stored in the terms
-        // Note: This is a simplified approach - in production you may need to handle multiple holders
+        // Get the account owner address
+        address owner = whitelist.getAccountOwner(accountId);
         
-        // Mark position as inactive
-        instrument.setActiveStatus(tokenId, false);
+        // Get the token balance held by this account
+        uint256 balance = instrument.balanceOf(owner, tokenId);
+        if (balance == 0) return; // Account doesn't hold this token
 
-        // Note: In a full implementation, you would:
-        // 1. Iterate through all accounts that hold this token
-        // 2. Release IM for each account
-        // 3. Update MM for each account
-        // 4. Remove notional for each account
-        // 5. Burn tokens for each account
-        // 6. Emit PositionMatured for each (tokenId, accountId) pair
+        address collateralToken = terms.collateralToken;
+        uint256 tenor = terms.maturityDate - terms.startDate;
 
-        // For now, we emit a simplified event
-        emit PositionMatured(tokenId, bytes32(0), block.timestamp);
+        // Calculate the IM that was locked for this position (based on actual balance held)
+        uint256 imRequired = riskEngine.calculateIM(balance, tenor);
+
+        // 1. Release Initial Margin for this account
+        marginVault.releaseInitialMargin(accountId, collateralToken, imRequired);
+
+        // 2. Update Maintenance Margin for this account
+        _updateAccountMaintenanceMargin(accountId, collateralToken);
+
+        // 3. Remove notional from the account's owner in whitelist (based on actual balance held)
+        whitelist.removeNotional(owner, balance);
+
+        // 4. Burn the position tokens
+        instrument.burnPosition(owner, tokenId, balance);
+
+        // 5. Remove tokenId from account's position list
+        _removeTokenFromAccount(accountId, collateralToken, tokenId);
+
+        emit PositionClosed(tokenId, accountId);
+    }
+
+    /// @dev Remove a tokenId from an account's position list.
+    /// @param accountId The account identifier.
+    /// @param collateralToken The collateral token.
+    /// @param tokenId The token ID to remove.
+    function _removeTokenFromAccount(
+        bytes32 accountId,
+        address collateralToken,
+        uint256 tokenId
+    ) internal {
+        uint256[] storage tokens = accountTokenIds[accountId][collateralToken];
+        for (uint256 i; i < tokens.length; ++i) {
+            if (tokens[i] == tokenId) {
+                // Move last element to this position and pop
+                tokens[i] = tokens[tokens.length - 1];
+                tokens.pop();
+                break;
+            }
+        }
     }
 
     // ─── Internal: Margin Calculations ─────────────────────────────────
@@ -533,16 +574,20 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @dev Called by the LiquidationEngine during absorbPosition.
     ///      Handles the transfer of positions, margin requirements, and notional tracking.
     ///      Also transfers ERC-1155 position tokens to maintain the invariant: token holder = position owner.
+    ///      Transfers the NPV of each position from liquidated account to liquidator (or vice versa).
+    ///      Also handles the liquidation premium payment to the liquidator.
     /// @param liquidatedAccount The account being liquidated.
     /// @param liquidatorAccountId The liquidator's account taking over positions.
     /// @param collateralToken The collateral token for the liquidation.
     /// @param imAmount The initial margin amount to lock for the liquidator.
+    /// @param premium The liquidation premium to pay to the liquidator.
     /// @return tokenIds Array of tokenIds transferred.
-    function transferPositions(
+    function absorbPositions(
         bytes32 liquidatedAccount,
         bytes32 liquidatorAccountId,
         address collateralToken,
-        uint256 imAmount
+        uint256 imAmount,
+        uint256 premium
     ) external onlyRole(LIQUIDATION_ENGINE_ROLE) returns (uint256[] memory tokenIds) {
         // Get all positions for the liquidated account
         uint256[] storage positions_ = accountTokenIds[liquidatedAccount][collateralToken];
@@ -561,7 +606,9 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         }
         
         tokenIds = new uint256[](activeCount);
+        uint256[] memory balances = new uint256[](activeCount); // Track actual balances transferred
         uint256 index;
+        int256 totalNpvTransfer; // Sum of all position NPVs to transfer
         
         // Transfer each active position for this collateral token
         for (uint256 i = 0; i < positions_.length; i++) {
@@ -570,10 +617,19 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
             
             if (terms.active && terms.collateralToken == collateralToken) {
                 tokenIds[index] = tokenId;
-                index++;
                 
                 // Get the balance (amount/notional) of this token held by the liquidated owner
                 uint256 balance = instrument.balanceOf(liquidatedOwner, tokenId);
+                balances[index] = balance;
+                index++;
+                
+                // Accumulate the NPV of this position (proportional to balance held)
+                // Positive NPV = position has value, liquidator should pay liquidated
+                // Negative NPV = position has liability, liquidated should pay liquidator
+                // NPV is stored for the full notional, so we calculate the proportional amount
+                if (balance > 0 && terms.notional > 0) {
+                    totalNpvTransfer += (int256(balance) * terms.lastNpv) / int256(terms.notional);
+                }
                 
                 if (balance > 0) {
                     // Transfer the token from liquidated owner to liquidator owner
@@ -589,10 +645,9 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         delete accountTokenIds[liquidatedAccount][collateralToken];
         
         // Update notional tracking
-        // Add notional to liquidator's owner for each transferred position
+        // Add notional to liquidator's owner for each transferred position (using actual balance)
         for (uint256 i = 0; i < tokenIds.length; i++) {
-            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenIds[i]);
-            whitelist.addNotional(liquidatorOwner, terms.notional);
+            whitelist.addNotional(liquidatorOwner, balances[i]);
         }
         
         // Lock initial margin for the liquidator
@@ -612,13 +667,25 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         // Update maintenance margin for liquidated account
         _updateAccountMaintenanceMargin(liquidatedAccount, collateralToken);
         
-        // Remove notional from liquidated account's owner
+        // Remove notional from liquidated account's owner (using actual balance)
         for (uint256 i = 0; i < tokenIds.length; i++) {
-            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenIds[i]);
-            whitelist.removeNotional(liquidatedOwner, terms.notional);
+            whitelist.removeNotional(liquidatedOwner, balances[i]);
         }
         
-        emit PositionsTransferred(liquidatedAccount, liquidatorAccountId, tokenIds, collateralToken);
+        // Transfer NPV and premium between accounts in a single settlement per account:
+        // - Liquidated account: receives NPV (positive = credit, negative = debit) minus premium (debit)
+        // - Liquidator account: pays NPV (opposite sign) plus premium (credit)
+        // Net effect:
+        //   - Liquidated: totalNpvTransfer - premium
+        //   - Liquidator: -totalNpvTransfer + premium = -(totalNpvTransfer - premium)
+        int256 liquidatedTransfer = totalNpvTransfer - int256(premium);
+        
+        if (liquidatedTransfer != 0) {
+            marginVault.settleVariationMargin(liquidatedAccount, collateralToken, liquidatedTransfer);
+            marginVault.settleVariationMargin(liquidatorAccountId, collateralToken, -liquidatedTransfer);
+        }
+        
+        emit PositionsAbsorbed(liquidatedAccount, liquidatorAccountId, tokenIds, collateralToken, liquidatedTransfer);
     }
 
     /// @notice Get the total IM requirement for an account's positions in a specific collateral token.

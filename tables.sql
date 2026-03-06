@@ -83,3 +83,6 @@ CREATE INDEX idx_liquidation_monitoring_account_id ON liquidation_monitoring(acc
 
 -- Index for fast lookups by account_id + collateral_token combination
 CREATE INDEX idx_liquidation_monitoring_account_token ON liquidation_monitoring(account_id, collateral_token);
+
+-- Unique constraint for account_id + collateral_token combination (required for ON CONFLICT upserts)
+CREATE UNIQUE INDEX idx_liquidation_monitoring_account_token_unique ON liquidation_monitoring(account_id, collateral_token);

@@ -62,6 +62,12 @@ type Config = z.infer<typeof configSchema>
  *       "vmChange": "1000000000000000000"
  *     }
  *   ],
+ *   "maturedPositions": [
+ *     {
+ *       "accountId": "0x...",
+ *       "tokenId": "1234567890abcdef..."
+ *     }
+ *   ],
  *   "metadata": {
  *     "settlementDate": "2026-02-25",
  *     "npvSource": "internal"
@@ -72,6 +78,7 @@ type Config = z.infer<typeof configSchema>
  * - tokenId: uint256 as string (ERC-1155 token ID)
  * - npvChange: string representation of int256 (positive = NPV increased from fixed payer's perspective)
  * - isFinal: boolean indicating if this is a final matured position settlement (true) or regular VM settlement (false)
+ * - maturedPositions: array of positions to close (only used for final settlements)
  */
 const vmSettlementPayloadSchema = z.object({
 	npvChanges: z.array(
@@ -88,6 +95,12 @@ const vmSettlementPayloadSchema = z.object({
 			vmChange: z.string(),
 		}),
 	),
+	maturedPositions: z.array(
+		z.object({
+			accountId: z.string(),
+			tokenId: z.string(),
+		}),
+	).optional(),
 	metadata: z
 		.object({
 			settlementDate: z.string(),
@@ -372,11 +385,11 @@ const writeVMSettlement = (
 			runtime.log(`  Matured Settlement ${i + 1}: Token ${s.tokenId} -> ${s.npvChange}`)
 		}
 
-		// ABI-encode the matured position settlement data as (uint8, NPVChange[], VMSettlement[])
+		// ABI-encode the matured position settlement data as (uint8, NPVChange[], VMSettlement[], MaturedPosition[])
 		// ReportType = 2 indicates matured position settlement
-		// The contract expects BOTH npvChanges AND vmSettlements arrays
+		// The contract expects npvChanges, vmSettlements, AND maturedPositions arrays
 		const maturedSettlementParams = parseAbiParameters(
-			'uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[]',
+			'uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[], (bytes32 accountId, uint256 tokenId)[]',
 		)
 
 		// Create NPVChange struct array
@@ -392,10 +405,24 @@ const writeVMSettlement = (
 			vmChange: toBigIntSafe(s.vmChange),
 		}))
 
+		// Create MaturedPosition struct array from the API response
+		// These are the positions that will be closed after settlement
+		// IMPORTANT: Only include matured positions whose tokenId matches a matured settlement
+		const maturedSettlementTokenIds = new Set(maturedSettlements.map((s) => s.tokenId))
+		const maturedPositionsArray = (payload.maturedPositions || [])
+			.filter((p) => maturedSettlementTokenIds.has(p.tokenId))
+			.map((p) => ({
+				accountId: toBytes32(p.accountId),
+				tokenId: toBigIntSafe(p.tokenId),
+			}))
+
+		runtime.log(`  Including ${maturedPositionsArray.length} matured positions to close`)
+
 		const reportData = encodeAbiParameters(maturedSettlementParams, [
 			2, // Report type: 2 = Matured position settlement
 			npvChangeArray,
 			vmSettlementArray,
+			maturedPositionsArray,
 		])
 
 		runtime.log(`Encoded matured position report data: ${reportData}`)
@@ -461,6 +488,7 @@ const executeVMSettlementWorkflow = (runtime: Runtime<Config>): string => {
 			ConsensusAggregationByFields({
 				npvChanges: median as any,
 				vmSettlements: median as any,
+				maturedPositions: median as any,
 				metadata: median as any,
 			}),
 		)(runtime.config)

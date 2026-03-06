@@ -15845,6 +15845,10 @@ var vmSettlementPayloadSchema = exports_external.object({
     collateralToken: exports_external.string(),
     vmChange: exports_external.string()
   })),
+  maturedPositions: exports_external.array(exports_external.object({
+    accountId: exports_external.string(),
+    tokenId: exports_external.string()
+  })).optional(),
   metadata: exports_external.object({
     settlementDate: exports_external.string(),
     npvSource: exports_external.string()
@@ -15996,7 +16000,7 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
       const s = maturedSettlements[i2];
       runtime2.log(`  Matured Settlement ${i2 + 1}: Token ${s.tokenId} -> ${s.npvChange}`);
     }
-    const maturedSettlementParams = parseAbiParameters("uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[]");
+    const maturedSettlementParams = parseAbiParameters("uint8, (uint256 tokenId, int256 npvChange)[], (bytes32 accountId, address collateralToken, int256 vmChange)[], (bytes32 accountId, uint256 tokenId)[]");
     const npvChangeArray = maturedSettlements.map((s) => ({
       tokenId: toBigIntSafe(s.tokenId),
       npvChange: toBigIntSafe(s.npvChange)
@@ -16006,10 +16010,17 @@ var writeVMSettlement = (runtime2, evmConfig, payload) => {
       collateralToken: s.collateralToken,
       vmChange: toBigIntSafe(s.vmChange)
     }));
+    const maturedSettlementTokenIds = new Set(maturedSettlements.map((s) => s.tokenId));
+    const maturedPositionsArray = (payload.maturedPositions || []).filter((p) => maturedSettlementTokenIds.has(p.tokenId)).map((p) => ({
+      accountId: toBytes32(p.accountId),
+      tokenId: toBigIntSafe(p.tokenId)
+    }));
+    runtime2.log(`  Including ${maturedPositionsArray.length} matured positions to close`);
     const reportData = encodeAbiParameters(maturedSettlementParams, [
       2,
       npvChangeArray,
-      vmSettlementArray
+      vmSettlementArray,
+      maturedPositionsArray
     ]);
     runtime2.log(`Encoded matured position report data: ${reportData}`);
     const reportResponse = runtime2.report({
@@ -16044,6 +16055,7 @@ var executeVMSettlementWorkflow = (runtime2) => {
   const vmSettlementData = httpCapability.sendRequest(runtime2, (sendRequester, config) => fetchVMSettlement(sendRequester, config), ConsensusAggregationByFields({
     npvChanges: median,
     vmSettlements: median,
+    maturedPositions: median,
     metadata: median
   }))(runtime2.config).result();
   runtime2.log(`VM Settlement Data: ${JSON.stringify(vmSettlementData)}`);

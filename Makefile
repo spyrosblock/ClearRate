@@ -140,14 +140,16 @@ settle-vm:
 # ===============================================
 
 # Final variation margin settlement for all positions
-# Store PositionMatured Event (13) - ClearingHouse.sol
-# Store AccountMMUpdated Event (5) - RiskEngine.sol
-# Store AccountMMUpdated Event (6) - RiskEngine.sol
+# Store AccountMMUpdated Event (7) - RiskEngine.sol
+# Store AccountMMUpdated Event (13) - RiskEngine.sol
+# Store PositionMatured Event (18) - ClearingHouse.sol
+# Store PositionMatured Event (19) - ClearingHouse.sol
 settle-vm-final:
 	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
 	cre workflow simulate settle-vm-workflow --target final-staging-settings --broadcast
 	@echo "Variation margin settled successfully!"
+	$(MAKE) store-logs
 	$(MAKE) store-logs
 	$(MAKE) store-logs
 	$(MAKE) store-logs
@@ -175,15 +177,19 @@ withdraw-margin:
 # make settle-vm
 
 # Liquidate the liquidatable users
-liquidation:
+liquidate:
 	@echo "Liquidating..."
 	cd liquidation-workflow && bun install
 	cre workflow simulate liquidation-workflow --target staging-settings --broadcast
 
-# Store PositionsAbsorbed Event (10) - LiquidationEngine.sol
+# Store PositionsAbsorbed Event (9) - ClearingHouse.sol
+# Store AccountMMUpdated Event (3) - RiskEngine.sol
+# Store AccountMMUpdated Event (5) - RiskEngine.sol
 absorb-positions:
 	@echo "Absorbing positions..."
 	cd contracts && make absorb-positions-sepolia
+	$(MAKE) store-logs
+	$(MAKE) store-logs
 	$(MAKE) store-logs
 
 # ===============================================

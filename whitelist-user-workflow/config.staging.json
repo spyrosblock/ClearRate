@@ -1,7 +1,7 @@
 {
   "evms": [
     {
-      "whitelistAddress": "0x0d51c746fa2c5c2d8af84856b2915b4e5faa32f7",
+      "whitelistAddress": "0x34186ddef18dd8678d86b570e11c7eb1d2df1e82",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "500000"
     }

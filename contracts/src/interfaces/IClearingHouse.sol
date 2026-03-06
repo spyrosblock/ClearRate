@@ -37,6 +37,13 @@ interface IClearingHouse {
         int256 npvChange;
     }
 
+    /// @notice Matured position entry for settlement.
+    /// @dev Used to close matured positions and release margin.
+    struct MaturedPosition {
+        bytes32 accountId;  // Account that holds the position
+        uint256 tokenId;    // The token that has matured
+    }
+
     // ─── Events ─────────────────────────────────────────────────────────
 
     event TradeSubmitted(bytes32 indexed tradeId);
@@ -65,13 +72,15 @@ interface IClearingHouse {
         int256 vmChange,
         uint256 timestamp
     );
-    event PositionMatured(uint256 indexed tokenId, bytes32 accountId, uint256 timestamp);
+    event PositionMatured(uint256 indexed tokenId, uint256 timestamp);
+    event PositionClosed(uint256 indexed tokenId, bytes32 accountId);
     event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
-    event PositionsTransferred(
+    event PositionsAbsorbed(
         bytes32 indexed fromAccount,
         bytes32 indexed toAccount,
         uint256[] tokenIds,
-        address collateralToken
+        address collateralToken,
+        int256 liquidatedTransfer
     );
 
     // ─── Errors ─────────────────────────────────────────────────────────

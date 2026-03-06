@@ -166,6 +166,14 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         // Get total IM requirement for the liquidated account's positions in this collateral token
         uint256 imRequired = clearingHouse.getTotalIMForToken(accountId, collateralToken);
 
+        // Calculate current premium (linear decay)
+        uint256 currentPremiumBps = _currentPremium(auction, elapsed);
+
+        // Calculate the premium to pay to the liquidator
+        // Premium is based on the total collateral of the liquidated account
+        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
+        uint256 premium = (totalCollateral * currentPremiumBps) / BPS;
+
         // Transfer positions from liquidated account to liquidator
         // This will:
         // 1. Update the position's partyA/partyB to the liquidator
@@ -174,27 +182,15 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         // 4. Release IM from the liquidated account
         // 5. Update MM for both accounts
         // 6. Update notional tracking
-        clearingHouse.transferPositions(
+        // 7. Transfer NPV of positions between accounts
+        // 8. Transfer premium from liquidated to liquidator
+        clearingHouse.absorbPositions(
             accountId,
             liquidatorAccountId,
             collateralToken,
-            imRequired
+            imRequired,
+            premium
         );
-
-        // Calculate current premium (linear decay)
-        uint256 currentPremiumBps = _currentPremium(auction, elapsed);
-
-        // Calculate and transfer the premium to the liquidator
-        // Premium is based on the total collateral of the liquidated account
-        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
-        uint256 premium = (totalCollateral * currentPremiumBps) / BPS;
-
-        if (premium > 0) {
-            // Deduct premium from liquidated account's collateral via VM settlement
-            // Credit the premium to liquidator's collateral
-            marginVault.settleVariationMargin(accountId, collateralToken, -int256(premium));
-            marginVault.settleVariationMargin(liquidatorAccountId, collateralToken, int256(premium));
-        }
 
         // Mark auction as resolved
         auction.active = false;

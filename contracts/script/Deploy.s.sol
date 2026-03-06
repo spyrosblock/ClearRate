@@ -38,11 +38,8 @@ contract Deploy is ClearRateScript {
     uint256 internal constant CONFIDENCE_BPS = 9900;
     uint256 internal constant MM_RATIO_BPS = 7500;
 
-    // ─── Oracle Parameters ─────────────────────────────────────────────
-    uint256 internal constant MAX_STALENESS = 1 days;
-
     // ─── Liquidation Parameters ────────────────────────────────────────
-    uint256 internal constant AUCTION_DURATION = 1 hours;
+    uint256 internal constant AUCTION_DURATION = 1 days;
     uint256 internal constant START_PREMIUM_BPS = 500;
 
     /// @notice Main entry point for deployment.

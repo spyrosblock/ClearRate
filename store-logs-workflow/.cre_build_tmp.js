@@ -16599,10 +16599,9 @@ var handleTradeNovated = async (context) => {
 var handlePositionMatured = (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
-  runtime2.log(`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | accountId ${typedArgs.accountId} | timestamp ${typedArgs.timestamp}`);
+  runtime2.log(`Event PositionMatured detected: tokenId ${typedArgs.tokenId} | timestamp ${typedArgs.timestamp}`);
   const payload = {
-    tokenId: typedArgs.tokenId.toString(),
-    accountId: typedArgs.accountId
+    tokenId: typedArgs.tokenId.toString()
   };
   runtime2.log(`Updating position to inactive: ${JSON.stringify(payload)}`);
   const httpClient = new cre.capabilities.HTTPClient;
@@ -16696,19 +16695,19 @@ var handleAccountMMUpdated = (context) => {
 var handlePositionsAbsorbed = async (context) => {
   const { runtime: runtime2, args, config } = context;
   const typedArgs = args;
-  runtime2.log(`Event PositionsAbsorbed detected: accountId ${typedArgs.accountId} | collateralToken ${typedArgs.collateralToken} | liquidatorId ${typedArgs.liquidatorId} | premium ${typedArgs.premium}`);
+  runtime2.log(`Event PositionsAbsorbed detected: fromAccount ${typedArgs.fromAccount} | toAccount ${typedArgs.toAccount} | collateralToken ${typedArgs.collateralToken} | tokenIds count ${typedArgs.tokenIds.length} | liquidatedTransfer ${typedArgs.liquidatedTransfer}`);
   const httpClient = new cre.capabilities.HTTPClient;
   const absorbPositionsUrl = config.absorbPositionsApi.url;
   runtime2.log(`Calling absorb-positions API at: ${absorbPositionsUrl}`);
   const result = httpClient.sendRequest(runtime2, (sendRequester, _cfg) => postToApi(sendRequester, absorbPositionsUrl, {
-    liquidatedId: typedArgs.accountId,
+    liquidatedId: typedArgs.fromAccount,
     collateralToken: typedArgs.collateralToken,
-    liquidatorId: typedArgs.liquidatorId,
-    premium: typedArgs.premium.toString()
+    liquidatorId: typedArgs.toAccount,
+    liquidatedTransfer: typedArgs.liquidatedTransfer.toString()
   }), consensusIdenticalAggregation())(config).result();
   runtime2.log(`Absorb-positions API response status: ${result.statusCode}`);
   if (result.statusCode >= 200 && result.statusCode < 300) {
-    return { success: true, message: `Successfully processed PositionsAbsorbed for account ${typedArgs.accountId}` };
+    return { success: true, message: `Successfully processed PositionsAbsorbed for account ${typedArgs.fromAccount}` };
   } else {
     return { success: false, message: `Failed to process PositionsAbsorbed - API returned status ${result.statusCode}` };
   }
@@ -16754,11 +16753,11 @@ var executeHandler = async (eventName, context) => {
 };
 var eventAbi = parseAbi([
   "event TradeNovated(bytes32 indexed tradeId, uint256 tokenIdA, uint256 tokenIdB, bytes32 indexed partyA, bytes32 indexed partyB, uint256 notional, uint256 fixedRateBps, uint256 startDate, uint256 maturityDate, uint256 paymentInterval, uint8 dayCountConvention, bytes32 floatingRateIndex, address collateralToken)",
-  "event PositionMatured(uint256 indexed tokenId, bytes32 accountId, uint256 timestamp)",
+  "event PositionMatured(uint256 indexed tokenId, uint256 timestamp)",
   "event MarginDeposited(bytes32 indexed accountId, address indexed token, uint256 amount)",
   "event MarginWithdrawn(bytes32 indexed accountId, address indexed token, uint256 amount)",
   "event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM)",
-  "event PositionsAbsorbed(bytes32 indexed accountId, address indexed collateralToken, bytes32 indexed liquidatorId, uint256 premium)"
+  "event PositionsAbsorbed(bytes32 indexed fromAccount, bytes32 indexed toAccount, uint256[] tokenIds, address collateralToken, int256 liquidatedTransfer)"
 ]);
 var onLogTrigger = async (runtime2, log) => {
   runtime2.log("=== Store Logs Workflow: New Event Detected ===");

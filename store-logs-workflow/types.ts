@@ -63,7 +63,6 @@ export type NovatedPositionPayload = {
 
 export type PositionMaturedPayload = {
 	tokenId: string
-	accountId: string
 }
 
 export type CreateMarginRecordPayload = {
