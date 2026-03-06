@@ -41,6 +41,14 @@ interface VMSettlement {
 }
 
 /**
+ * Matured Position entry - matches MaturedPosition struct from IClearingHouse contract.
+ */
+interface MaturedPosition {
+  accountId: string;  // bytes32 as hex string - Account that holds the position
+  tokenId: string;    // uint256 as string - The token that has matured
+}
+
+/**
  * Constant NPV change value (5,000 tokens with 18 decimals).
  * This is used as a placeholder for actual NPV calculation.
  */
@@ -127,7 +135,7 @@ export async function POST(request: Request) {
         {
           npvChanges: [],
           vmSettlements: [],
-          settlements: [],
+          maturedPositions: [],
           metadata: {
             settlementDate: new Date().toISOString().split('T')[0],
             npvSource: 'constant',
@@ -183,9 +191,17 @@ export async function POST(request: Request) {
       });
     }
 
+    // Mocked - should get only the positions where maturity_date < current date but for testing that's not happening
+    // Create maturedPositions array - all pairs of tokenId and accountId from positions
+    const maturedPositions: MaturedPosition[] = positions.map((position) => ({
+      accountId: position.owner_id,
+      tokenId: position.token_id,
+    }));
+
     const response = {
       npvChanges,
       vmSettlements,
+      maturedPositions,
       metadata: {
         settlementDate: new Date().toISOString().split('T')[0],
         npvSource: 'constant',
@@ -193,6 +209,7 @@ export async function POST(request: Request) {
         activePositionsCount: positions.length,
         npvChangesCount: npvChanges.length,
         vmSettlementsCount: vmSettlements.length,
+        maturedPositionsCount: maturedPositions.length,
       },
     };
 

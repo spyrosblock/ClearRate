@@ -7,8 +7,7 @@ import { sql } from '@/lib/db';
  * Payload received when a position matures.
  */
 interface PositionMaturedPayload {
-	tokenId: string,
-	accountId: string
+	tokenId: string
 }
 
 // ─── POST Handler: Mark Position as Matured ────────────────────────────────
@@ -17,15 +16,13 @@ export async function POST(request: Request) {
 	try {
 		const body: PositionMaturedPayload = await request.json()
 
-		const { tokenId, accountId } = body
+		const { tokenId } = body
 
 		// Update position to mark it as inactive (matured)
 		const result = await sql`
 			UPDATE swap_positions
 			SET active = FALSE, updated_at = NOW()
-			WHERE 
-        		token_id = ${tokenId}
-        		AND owner_id = ${accountId}
+			WHERE token_id = ${tokenId}
 			RETURNING id, token_id
 		`
 
