@@ -138,43 +138,44 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Check if user with this address already exists
-    const existingUser = await sql`
-      SELECT id FROM users WHERE address = ${address}
-    `;
-    
-    if (existingUser.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'User with this address already exists' },
-        { status: 409 }
-      );
-    }
-    
-    // Check if registration number already exists
-    const existingReg = await sql`
-      SELECT id FROM users WHERE registration_number = ${company.registrationNumber}
-    `;
-    
-    if (existingReg.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'Company with this registration number already exists' },
-        { status: 409 }
-      );
-    }
-    
-    // Check if LEI already exists
-    const existingLei = await sql`
-      SELECT id FROM users WHERE lei = ${company.lei}
-    `;
-    
-    if (existingLei.length > 0) {
-      return NextResponse.json(
-        { success: false, message: 'Company with this LEI already exists' },
-        { status: 409 }
-      );
-    }
-    
     // todo: uncomment this (commented it because it uses neon db cpu)
+    
+    // // Check if user with this address already exists
+    // const existingUser = await sql`
+    //   SELECT id FROM users WHERE address = ${address}
+    // `;
+    
+    // if (existingUser.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'User with this address already exists' },
+    //     { status: 409 }
+    //   );
+    // }
+    
+    // // Check if registration number already exists
+    // const existingReg = await sql`
+    //   SELECT id FROM users WHERE registration_number = ${company.registrationNumber}
+    // `;
+    
+    // if (existingReg.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'Company with this registration number already exists' },
+    //     { status: 409 }
+    //   );
+    // }
+    
+    // // Check if LEI already exists
+    // const existingLei = await sql`
+    //   SELECT id FROM users WHERE lei = ${company.lei}
+    // `;
+    
+    // if (existingLei.length > 0) {
+    //   return NextResponse.json(
+    //     { success: false, message: 'Company with this LEI already exists' },
+    //     { status: 409 }
+    //   );
+    // }
+    
     // // Insert user into database
     // const result = await sql`
     //   INSERT INTO users (
