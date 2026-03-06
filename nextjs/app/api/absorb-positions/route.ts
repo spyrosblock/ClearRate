@@ -22,7 +22,7 @@ interface AbsorbPositionsRequest {
  * - liquidatedId: bytes32 account ID of the liquidated party (owner_id in swap_positions)
  * - collateralToken: Collateral token address to filter positions
  * - liquidatorId: bytes32 account ID of the liquidator
- * - liquidatedTransfer: Net collateral amount to transfer (positive = liquidator receives, negative = liquidator pays)
+ * - liquidatedTransfer: Net collateral change for the liquidated account (positive = liquidated gains collateral, negative = liquidated loses collateral)
  * 
  * Response structure:
  * - success: boolean indicating operation success
@@ -70,8 +70,10 @@ export async function POST(request: Request) {
       `;
 
       // Transfer collateral between accounts in liquidation_monitoring
-      // liquidatedTransfer > 0: liquidator receives collateral from liquidated
-      // liquidatedTransfer < 0: liquidator pays collateral to liquidated
+      // liquidatedTransfer > 0: liquidated account GAINS collateral (credit), liquidator LOSES
+      // liquidatedTransfer < 0: liquidated account LOSES collateral (debit), liquidator GAINS
+      // This matches the on-chain behavior in MarginVault.settleVariationMargin:
+      //   Positive amount = credit (account gains), negative = debit (account loses)
       if (transferAmount !== zero) {
         // Convert to numeric for database (handle both positive and negative)
         const transferNumeric = transferAmount > zero 
@@ -79,7 +81,28 @@ export async function POST(request: Request) {
           : (-transferAmount).toString();
 
         if (transferAmount > zero) {
-          // Deduct from liquidated account
+          // Positive transfer: ADD to liquidated account, DEDUCT from liquidator
+          // Liquidated account gains collateral
+          await sql`
+            INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
+            VALUES (${liquidatedId}, ${transferNumeric}::numeric, 0, ${collateralToken})
+            ON CONFLICT (account_id, collateral_token) 
+            DO UPDATE SET 
+              total_collateral = liquidation_monitoring.total_collateral + ${transferNumeric}::numeric,
+              updated_at = NOW()
+          `;
+
+          // Deduct from liquidator account
+          await sql`
+            UPDATE liquidation_monitoring
+            SET total_collateral = GREATEST(total_collateral - ${transferNumeric}::numeric, 0),
+                updated_at = NOW()
+            WHERE account_id = ${liquidatorId}
+              AND collateral_token = ${collateralToken}
+          `;
+        } else {
+          // Negative transfer: DEDUCT from liquidated account, ADD to liquidator
+          // Liquidated account loses collateral
           await sql`
             UPDATE liquidation_monitoring
             SET total_collateral = GREATEST(total_collateral - ${transferNumeric}::numeric, 0),
@@ -88,29 +111,10 @@ export async function POST(request: Request) {
               AND collateral_token = ${collateralToken}
           `;
 
-          // Add to liquidator account (upsert if doesn't exist)
+          // Add to liquidator account
           await sql`
             INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
             VALUES (${liquidatorId}, ${transferNumeric}::numeric, 0, ${collateralToken})
-            ON CONFLICT (account_id, collateral_token) 
-            DO UPDATE SET 
-              total_collateral = liquidation_monitoring.total_collateral + ${transferNumeric}::numeric,
-              updated_at = NOW()
-          `;
-        } else {
-          // negative transfer: deduct from liquidator, add to liquidated
-          await sql`
-            UPDATE liquidation_monitoring
-            SET total_collateral = GREATEST(total_collateral - ${transferNumeric}::numeric, 0),
-                updated_at = NOW()
-            WHERE account_id = ${liquidatorId}
-              AND collateral_token = ${collateralToken}
-          `;
-
-          // Add to liquidated account
-          await sql`
-            INSERT INTO liquidation_monitoring (account_id, total_collateral, maintenance_margin, collateral_token)
-            VALUES (${liquidatedId}, ${transferNumeric}::numeric, 0, ${collateralToken})
             ON CONFLICT (account_id, collateral_token) 
             DO UPDATE SET 
               total_collateral = liquidation_monitoring.total_collateral + ${transferNumeric}::numeric,
