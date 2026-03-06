@@ -41,10 +41,10 @@ interface VMSettlement {
 }
 
 /**
- * Constant NPV change value (10,000 tokens with 18 decimals).
+ * Constant NPV change value (5,000 tokens with 18 decimals).
  * This is used as a placeholder for actual NPV calculation.
  */
-const CONSTANT_NPV_CHANGE = BigInt('10000000000000000000000'); // 10000e18
+const CONSTANT_NPV_CHANGE = BigInt('5000000000000000000000'); // 5000e18
 
 /**
  * Get NPV change for a position.
