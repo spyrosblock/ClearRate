@@ -174,46 +174,47 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Insert user into database
-    const result = await sql`
-      INSERT INTO users (
-        address,
-        account_id,
-        company_name,
-        registration_number,
-        registered_country,
-        contact_email,
-        lei,
-        website,
-        articles_of_association,
-        certificate_of_incorporation,
-        vat_certificate,
-        iban,
-        bic,
-        approved,
-        valid_until,
-        max_notional,
-        notional
-      ) VALUES (
-        ${address},
-        ${accountId || null},
-        ${company.companyName},
-        ${company.registrationNumber},
-        ${company.registeredCountry},
-        ${company.contactEmail},
-        ${company.lei},
-        ${company.website},
-        ${company.uploadedLegalDocs.articlesOfAssociation},
-        ${company.uploadedLegalDocs.certificateOfIncorporation},
-        ${company.uploadedLegalDocs.vatCertificate},
-        ${company.bankDetails.iban},
-        ${company.bankDetails.bic},
-        ${approved ?? false},
-        ${validUntil ? new Date(validUntil) : null},
-        ${maxNotional || '0'},
-        ${notional || '0'}
-      )
-    `;
+    // todo: uncomment this (commented it because it uses neon db cpu)
+    // // Insert user into database
+    // const result = await sql`
+    //   INSERT INTO users (
+    //     address,
+    //     account_id,
+    //     company_name,
+    //     registration_number,
+    //     registered_country,
+    //     contact_email,
+    //     lei,
+    //     website,
+    //     articles_of_association,
+    //     certificate_of_incorporation,
+    //     vat_certificate,
+    //     iban,
+    //     bic,
+    //     approved,
+    //     valid_until,
+    //     max_notional,
+    //     notional
+    //   ) VALUES (
+    //     ${address},
+    //     ${accountId || null},
+    //     ${company.companyName},
+    //     ${company.registrationNumber},
+    //     ${company.registeredCountry},
+    //     ${company.contactEmail},
+    //     ${company.lei},
+    //     ${company.website},
+    //     ${company.uploadedLegalDocs.articlesOfAssociation},
+    //     ${company.uploadedLegalDocs.certificateOfIncorporation},
+    //     ${company.uploadedLegalDocs.vatCertificate},
+    //     ${company.bankDetails.iban},
+    //     ${company.bankDetails.bic},
+    //     ${approved ?? false},
+    //     ${validUntil ? new Date(validUntil) : null},
+    //     ${maxNotional || '0'},
+    //     ${notional || '0'}
+    //   )
+    // `;
     
     console.log('[Users API] User created successfully:');
     console.log('  Address:', address);
