@@ -404,3 +404,40 @@ The system replicates traditional CCP clearinghouse functionality on-chain while
 - **Chainlink CRE** for yield curve bootstrapping and NPV calculation
 - **Chainlink CCIP** for cross-chain margin synchronization
 - **Stablecoins** as 1:1 collateral (no price feed haircuts)
+
+
+
+```mermaid
+sequenceDiagram
+    participant Cron as Cron Trigger
+    participant Callback as Cron Callback
+    participant HTTP as HTTP Capability
+    participant API as Offchain API
+    participant EVM as EVM Capability
+    participant Chain as Blockchain
+    participant LLM as LLM API
+
+    Cron->>Callback: Step 1: Trigger
+    Callback->>Callback: Step 2: Callback runs
+
+    Callback->>HTTP: Step 3: Fetch reserve info
+    HTTP->>API: GET proof-of-reserves
+    API-->>HTTP: Reserve data
+    HTTP-->>Callback: Reserve info
+
+    Callback->>EVM: Step 4: Read total supply
+    EVM->>Chain: totalSupply()
+    Chain-->>EVM: Supply (uint256)
+    EVM-->>Callback: Total supply
+
+    Callback->>HTTP: Step 5: Get risk score
+    HTTP->>LLM: Reserve + supply
+    LLM-->>HTTP: riskScore 0–100
+    HTTP-->>Callback: Risk score
+
+    Callback->>EVM: Step 6: Write report
+    EVM->>Chain: onReport(metadata, report)
+    Note over Chain: Store reserve, supply,<br/>risk score, timestamp
+    Chain-->>EVM: Tx receipt
+    EVM-->>Callback: Done
+```
