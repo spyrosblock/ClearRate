@@ -76,7 +76,6 @@ interface IClearingHouse {
     );
     event PositionMatured(uint256 indexed tokenId, bytes32 indexed accountId, uint256 newMM);
     event PositionClosed(uint256 indexed tokenId, bytes32 accountId);
-    event ProtocolFeeUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event PositionsAbsorbed(
         bytes32 indexed fromAccount,
         bytes32 indexed toAccount,

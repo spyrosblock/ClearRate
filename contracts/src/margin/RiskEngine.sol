@@ -29,17 +29,13 @@ contract RiskEngine is AccessControl {
     /// @notice Maintenance margin as a fraction of IM in BPS (e.g. 7500 = 75% of IM).
     uint256 public maintenanceMarginRatioBps;
 
-    /// @notice Per-account initial margin requirement per collateral token (set by offchain compute or admin).
-    mapping(bytes32 => mapping(address => uint256)) public accountInitialMargin;
-
-    /// @notice Per-account maintenance margin requirement per collateral token (set by offchain compute or admin).
+    /// @notice Per-account maintenance margin requirement per collateral token.
     mapping(bytes32 => mapping(address => uint256)) public accountMaintenanceMargin;
 
     // ─── Events ─────────────────────────────────────────────────────────
     event RiskWeightUpdated(uint256 indexed tenor, uint256 oldWeight, uint256 newWeight);
     event ConfidenceUpdated(uint256 oldConfidence, uint256 newConfidence);
     event MaintenanceMarginRatioUpdated(uint256 oldRatio, uint256 newRatio);
-    event AccountIMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldIM, uint256 newIM);
     event AccountMMUpdated(bytes32 indexed accountId, address collateralToken, uint256 oldMM, uint256 newMM);
 
     // ─── Errors ─────────────────────────────────────────────────────────
@@ -165,20 +161,6 @@ contract RiskEngine is AccessControl {
     }
 
     // ─── Account Margin Updates ─────────────────────────────────────────
-
-    /// @notice Update the aggregate IM for an account for a specific collateral token (called after trade/compression).
-    /// @param accountId The account identifier.
-    /// @param collateralToken The collateral token.
-    /// @param newIM The new total IM requirement.
-    function updateAccountIM(
-        bytes32 accountId,
-        address collateralToken,
-        uint256 newIM
-    ) external onlyRole(CLEARING_HOUSE_ROLE) {
-        uint256 oldIM = accountInitialMargin[accountId][collateralToken];
-        accountInitialMargin[accountId][collateralToken] = newIM;
-        emit AccountIMUpdated(accountId, collateralToken, oldIM, newIM);
-    }
 
     /// @notice Update the maintenance margin for an account for a specific collateral token.
     /// @param accountId The account identifier.

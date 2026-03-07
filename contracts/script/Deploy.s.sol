@@ -30,7 +30,6 @@ contract Deploy is ClearRateScript {
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
     bytes32 internal constant RISK_ADMIN_ROLE = keccak256("RISK_ADMIN_ROLE");
     bytes32 internal constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
-    bytes32 internal constant LIQUIDATOR_ROLE = keccak256("LIQUIDATOR_ROLE");
     bytes32 internal constant WHITELIST_ADMIN_ROLE = keccak256("WHITELIST_ADMIN_ROLE");
     bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
@@ -110,8 +109,7 @@ contract Deploy is ClearRateScript {
             address(riskEngine),
             address(marginVault),
             address(whitelist),
-            AUCTION_DURATION,
-            START_PREMIUM_BPS
+            AUCTION_DURATION
         );
         logDeployment("LiquidationEngine", address(liquidationEngine));
 
@@ -141,10 +139,6 @@ contract Deploy is ClearRateScript {
         riskEngine.grantRole(CLEARING_HOUSE_ROLE, address(clearingHouse));
         riskEngine.grantRole(RISK_ADMIN_ROLE, deployer);
         console.log("- Granted CLEARING_HOUSE_ROLE to ClearingHouse on RiskEngine");
-
-        // Grant roles to LiquidationEngine
-        liquidationEngine.grantRole(LIQUIDATOR_ROLE, deployer);
-        console.log("- Granted LIQUIDATOR_ROLE to deployer on LiquidationEngine");
 
         // Grant roles to Whitelist
         whitelist.grantRole(WHITELIST_ADMIN_ROLE, deployer);

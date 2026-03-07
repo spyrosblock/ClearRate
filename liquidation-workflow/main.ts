@@ -49,7 +49,8 @@ type Config = z.infer<typeof configSchema>
  *       "accountId": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
  *       "collateralToken": "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa",
  *       "totalCollateral": "1000000000000000000",
- *       "maintenanceMargin": "2000000000000000000"
+ *       "maintenanceMargin": "2000000000000000000",
+ *       "startPremiumBps": 500
  *     }
  *   ],
  *   "count": 1
@@ -64,6 +65,7 @@ const liquidationTargetsResponseSchema = z.object({
 			collateralToken: z.string(),
 			totalCollateral: z.string(),
 			maintenanceMargin: z.string(),
+			startPremiumBps: z.number(),
 		}),
 	).optional(),
 	count: z.number().optional(),
@@ -78,6 +80,7 @@ type LiquidationTargetsResponse = z.infer<typeof liquidationTargetsResponseSchem
 interface LiquidationTarget {
 	accountId: `0x${string}` // bytes32
 	collateralToken: `0x${string}` // address
+	startPremiumBps: bigint // uint256
 }
 
 /**
@@ -186,15 +189,16 @@ const writeLiquidationReport = (
 
 	// ABI-encode the liquidation data as (uint8, LiquidationTarget[])
 	// ReportType = 0 indicates liquidation
-	// LiquidationTarget struct: (bytes32 accountId, address collateralToken)
+	// LiquidationTarget struct: (bytes32 accountId, address collateralToken, uint256 startPremiumBps)
 	const liquidationParams = parseAbiParameters(
-		'uint8, (bytes32 accountId, address collateralToken)[]',
+		'uint8, (bytes32 accountId, address collateralToken, uint256 startPremiumBps)[]',
 	)
 
 	// Create struct array as array of objects
 	const liquidationTargets = targets.map((t) => ({
 		accountId: t.accountId,
 		collateralToken: t.collateralToken,
+		startPremiumBps: t.startPremiumBps,
 	}))
 
 	const reportData = encodeAbiParameters(liquidationParams, [
@@ -281,6 +285,7 @@ const executeLiquidationWorkflow = (runtime: Runtime<Config>): string => {
 	const liquidationTargets: LiquidationTarget[] = targets.map((t) => ({
 		accountId: toBytes32(t.accountId),
 		collateralToken: toAddress(t.collateralToken),
+		startPremiumBps: BigInt(t.startPremiumBps),
 	}))
 
 	runtime.log('Writing liquidation report to LiquidationEngine...')

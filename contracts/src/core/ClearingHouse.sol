@@ -63,12 +63,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
     /// @notice Total number of positions.
     uint256 public positionCount;
 
-    /// @notice Protocol fee in BPS charged on notional per trade.
-    uint256 public protocolFeeBps;
-
-    /// @notice Protocol fee recipient address.
-    address public feeRecipient;
-
     // ─── Constructor ────────────────────────────────────────────────────
 
     /// @notice Deploy the ClearingHouse.
@@ -95,22 +89,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         riskEngine = RiskEngine(riskEngine_);
         whitelist = Whitelist(whitelist_);
     }
-
-    // ─── External Functions ─────────────────────────────────────────────
-
-    /// @notice Set the protocol fee.
-    /// @param newFeeBps New fee in basis points.
-    function setProtocolFee(uint256 newFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        emit ProtocolFeeUpdated(protocolFeeBps, newFeeBps);
-        protocolFeeBps = newFeeBps;
-    }
-
-    /// @notice Set the fee recipient address.
-    /// @param recipient The new fee recipient.
-    function setFeeRecipient(address recipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        feeRecipient = recipient;
-    }
-
+    
     // ─── View Functions ─────────────────────────────────────────────────
 
     /// @notice Get the EIP-712 digest for a matched trade.

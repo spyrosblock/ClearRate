@@ -198,6 +198,11 @@ transfer-position:
 get-margin-data:
 	cd contracts && make get-margin-data-sepolia
 
+# Get db data
+get-db-data:
+	@echo "Getting DB Data..."
+	clear && curl https://clear-rate.vercel.app/api/data
+
 # ===============================================
 # TROUBLESHOOT
 # ===============================================

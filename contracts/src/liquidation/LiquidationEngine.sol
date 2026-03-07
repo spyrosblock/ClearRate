@@ -22,14 +22,13 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     // ─── Constants ──────────────────────────────────────────────────────
     uint256 internal constant BPS = 10_000;
 
-    bytes32 public constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
-
     // ─── Structs ────────────────────────────────────────────────────────
 
     /// @notice 
     struct LiquidationTarget {
         bytes32 accountId;            // Unique identifier for the account
         address collateralToken;      // Collateral token
+        uint256 startPremiumBps;     // Initial premium in BPS (e.g. 500 = 5%)
     }
 
     /// @notice State of an active liquidation auction.
@@ -38,7 +37,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         uint256 startTime;            // Auction start timestamp
         uint256 startPremiumBps;      // Initial premium in BPS (e.g. 500 = 5%)
         uint256 duration;             // Auction duration in seconds
-        uint256 availableCollateral;  // Available collateral to be auctioned off
         bool active;                  // Whether the auction is still active
     }
 
@@ -62,9 +60,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     /// @notice Default auction duration in seconds.
     uint256 public defaultAuctionDuration;
 
-    /// @notice Default starting premium in BPS.
-    uint256 public defaultStartPremiumBps;
-
     /// @notice Minimum premium at end of auction (0 = full decay).
     uint256 public minPremiumBps;
 
@@ -74,8 +69,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         address collateralToken,
         uint256 startTime,
         uint256 startPremium,
-        uint256 duration,
-        uint256 availableCollateral  // Total collateral to be auctioned off
+        uint256 duration
     );
     event PositionsAbsorbed(
         bytes32 indexed accountId,
@@ -83,7 +77,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         bytes32 indexed liquidatorId,
         uint256 premium
     );
-    event AuctionParametersUpdated(uint256 duration, uint256 startPremiumBps, uint256 minPremiumBps);
+    event AuctionParametersUpdated(uint256 duration, uint256 minPremiumBps);
 
     // ─── Errors ─────────────────────────────────────────────────────────
     error AccountNotLiquidatable(bytes32 accountId);
@@ -91,10 +85,11 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     error NoActiveAuction(bytes32 accountId);
     error AuctionExpired(bytes32 accountId);
     error InvalidDuration();
-    error InvalidPremium();
     error LiquidatorNotWhitelisted(address liquidator);
     error InvalidReportType(uint8 reportType);
     error LiquidatorSameAsLiquidatedAccount(address liquidator);
+    error InvalidMinPremium();
+    error InvalidPremium();
 
     // ─── Constructor ────────────────────────────────────────────────────
 
@@ -105,7 +100,6 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     /// @param marginVault_ The MarginVault contract address.
     /// @param whitelist_ The Whitelist contract address.
     /// @param auctionDuration_ Default auction duration in seconds.
-    /// @param startPremium_ Default starting premium in BPS.
     constructor(
         address admin,
         address forwarder,
@@ -113,8 +107,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         address riskEngine_,
         address marginVault_,
         address whitelist_,
-        uint256 auctionDuration_,
-        uint256 startPremium_
+        uint256 auctionDuration_
     ) ReceiverTemplate(forwarder) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
 
@@ -124,21 +117,11 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         whitelist = Whitelist(whitelist_);
 
         if (auctionDuration_ == 0) revert InvalidDuration();
-        if (startPremium_ == 0 || startPremium_ > BPS) revert InvalidPremium();
 
         defaultAuctionDuration = auctionDuration_;
-        defaultStartPremiumBps = startPremium_;
     }
 
     // ─── Liquidation Functions ──────────────────────────────────────────
-
-    /// @notice Start a liquidation auction for an undercollateralized account for a specific collateral token.
-    /// @param targets An array of LiquidationTarget structs.
-    function liquidateAccounts(LiquidationTarget[] memory targets) external {
-        for (uint i = 0; i < targets.length; i++) {
-            _liquidateAccount(targets[i].accountId, targets[i].collateralToken);
-        }
-    }
 
     /// @notice Absorb positions from a liquidated account (Dutch auction bid).
     /// @dev The premium decays linearly from startPremiumBps to minPremiumBps over the auction duration.
@@ -202,22 +185,18 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
     /// @notice Update default auction parameters.
     /// @param duration_ New default auction duration.
-    /// @param startPremium_ New default starting premium in BPS.
     /// @param minPremium_ New minimum premium at auction end in BPS.
     function setAuctionParameters(
         uint256 duration_,
-        uint256 startPremium_,
         uint256 minPremium_
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (duration_ == 0) revert InvalidDuration();
-        if (startPremium_ == 0 || startPremium_ > BPS) revert InvalidPremium();
-        if (minPremium_ > startPremium_) revert InvalidPremium();
+        if (minPremium_ > BPS) revert InvalidMinPremium();
 
         defaultAuctionDuration = duration_;
-        defaultStartPremiumBps = startPremium_;
         minPremiumBps = minPremium_;
 
-        emit AuctionParametersUpdated(duration_, startPremium_, minPremium_);
+        emit AuctionParametersUpdated(duration_, minPremium_);
     }
 
     // ─── View Functions ─────────────────────────────────────────────────
@@ -244,24 +223,20 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
     // ─── Internal ───────────────────────────────────────────────────────
 
-    function _liquidateAccount(bytes32 accountId, address collateralToken) internal {
+    function _liquidateAccount(bytes32 accountId, address collateralToken, uint256 startPremium) internal {
         if (!riskEngine.isLiquidatable(accountId, collateralToken)) {
             revert AccountNotLiquidatable(accountId);
         }
         if (auctions[accountId][collateralToken].active) {
             revert AuctionAlreadyActive(accountId);
         }
-
-        uint256 totalCollateral = marginVault.getTotalCollateral(accountId, collateralToken);
-        uint256 lockedIM = riskEngine.accountInitialMargin(accountId, collateralToken);
-        uint256 availableCollateral = totalCollateral > lockedIM ? totalCollateral - lockedIM : 0;
+        if (startPremium == 0 || startPremium > BPS) revert InvalidPremium();
 
         auctions[accountId][collateralToken] = Auction({
             accountId: accountId,
             startTime: block.timestamp,
-            startPremiumBps: defaultStartPremiumBps,
+            startPremiumBps: startPremium,
             duration: defaultAuctionDuration,
-            availableCollateral: availableCollateral,
             active: true
         });
 
@@ -269,9 +244,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
             accountId,
             collateralToken,
             block.timestamp,
-            defaultStartPremiumBps,
-            defaultAuctionDuration,
-            availableCollateral
+            startPremium,
+            defaultAuctionDuration
         );
     }
 
@@ -314,7 +288,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
                 (uint8, LiquidationTarget[])
             );
             for (uint i = 0; i < targets.length; i++) {
-                _liquidateAccount(targets[i].accountId, targets[i].collateralToken);
+                _liquidateAccount(targets[i].accountId, targets[i].collateralToken, targets[i].startPremiumBps);
             }
         } else {
             revert InvalidReportType(reportType);

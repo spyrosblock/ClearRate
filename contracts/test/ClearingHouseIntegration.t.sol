@@ -3,14 +3,14 @@ pragma solidity ^0.8.24;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {IClearingHouse} from "../../src/interfaces/IClearingHouse.sol";
-import {ClearingHouse} from "../../src/core/ClearingHouse.sol";
-import {IRSInstrument} from "../../src/core/IRSInstrument.sol";
-import {MarginVault} from "../../src/margin/MarginVault.sol";
-import {RiskEngine} from "../../src/margin/RiskEngine.sol";
-import {Whitelist} from "../../src/access/Whitelist.sol";
-import {LiquidationEngine} from "../../src/liquidation/LiquidationEngine.sol";
-import {ERC20Mock} from "../mocks/ERC20Mock.sol";
+import {IClearingHouse} from "./../src/interfaces/IClearingHouse.sol";
+import {ClearingHouse} from "./../src/core/ClearingHouse.sol";
+import {IRSInstrument} from "./../src/core/IRSInstrument.sol";
+import {MarginVault} from "./../src/margin/MarginVault.sol";
+import {RiskEngine} from "./../src/margin/RiskEngine.sol";
+import {Whitelist} from "./../src/access/Whitelist.sol";
+import {LiquidationEngine} from "./../src/liquidation/LiquidationEngine.sol";
+import {ERC20Mock} from "./mocks/ERC20Mock.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /// @title ClearingHouseIntegrationTest
@@ -131,16 +131,13 @@ contract ClearingHouseIntegrationTest is Test {
             address(riskEngine),
             address(marginVault),
             address(whitelist),
-            3600, // 1 hour auction duration
-            500   // 5% starting premium
+            3600 // 1 hour auction duration
         );
 
         // Wire up roles for liquidation
         vm.startPrank(admin);
         clearingHouse.grantRole(clearingHouse.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
         marginVault.grantRole(marginVault.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
-        liquidationEngine.grantRole(liquidationEngine.CLEARING_HOUSE_ROLE(), address(clearingHouse));
-
 
         // Grant operator & settler roles - forwarder needs OPERATOR_ROLE to call onReport
         clearingHouse.grantRole(OPERATOR_ROLE, forwarder);
@@ -259,9 +256,6 @@ contract ClearingHouseIntegrationTest is Test {
         
         // Check trade is marked as submitted
         assertTrue(clearingHouse.tradeSubmitted(tradeId), "Trade should be marked as submitted");
-        
-        // Check active position count
-        assertEq(clearingHouse.activePositionCount(), 1, "Should have 1 active position");
         
         // Get token IDs created for the trade
         (uint256 tokenIdA, uint256 tokenIdB, bool active) = clearingHouse.getTradeTokens(tradeId);
