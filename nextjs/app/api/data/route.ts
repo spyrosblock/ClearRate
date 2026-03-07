@@ -32,6 +32,25 @@ export async function GET() {
       return str.length > maxLen ? str.slice(0, maxLen - 3) + '...' : str;
     };
 
+    // Helper to format big number (divide by 10^18 to remove decimals)
+    const formatBigNumber = (value: string | number | bigint) => {
+      if (!value) return '0';
+      try {
+        const bigVal = BigInt(value);
+        const divisor = BigInt(10 ** 18);
+        const whole = bigVal / divisor;
+        const remainder = bigVal % divisor;
+        // Show up to 4 decimal places if there's a remainder
+        if (remainder === BigInt(0)) {
+          return whole.toString();
+        }
+        const decimalStr = remainder.toString().padStart(18, '0').slice(0, 4);
+        return `${whole}.${decimalStr.replace(/0+$/, '')}`;
+      } catch {
+        return String(value);
+      }
+    };
+
     // Helper to format direction
     const formatDirection = (d: unknown) => d === 0 ? 'PAY_FIXED' : 'RECV_FIXED';
 
@@ -66,7 +85,7 @@ export async function GET() {
         const id = String(pos.id).padEnd(2).slice(0, 2);
         const tokenId = truncate(String(pos.token_id), 14).padEnd(14);
         const ownerId = truncate(String(pos.owner_id), 13).padEnd(13);
-        const notional = truncate(String(pos.notional), 14).padEnd(14);
+        const notional = truncate(formatBigNumber(String(pos.notional)), 14).padEnd(14);
         const rate = (String(pos.fixed_rate_bps / 100) + '%').padEnd(6);
         const direction = formatDirection(pos.direction).padEnd(10);
         const startDate = formatTs(pos.start_date).slice(0, 19);
@@ -98,7 +117,7 @@ export async function GET() {
         const country = String(user.registered_country).padEnd(6);
         const email = truncate(String(user.contact_email), 23).padEnd(23);
         const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(7);
-        const maxNotional = truncate(String(user.max_notional || '0'), 15).padEnd(15);
+        const maxNotional = truncate(formatBigNumber(String(user.max_notional || '0')), 15).padEnd(15);
 
         output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
       }
@@ -122,8 +141,8 @@ export async function GET() {
         const id = String(lm.id).padEnd(2).slice(0, 2);
         const accountId = truncate(String(lm.account_id), 14).padEnd(14);
         const collateralToken = truncate(String(lm.collateral_token), 18).padEnd(18);
-        const totalCollateral = truncate(String(lm.total_collateral), 16).padEnd(16);
-        const maintenanceMargin = truncate(String(lm.maintenance_margin), 18).padEnd(18);
+        const totalCollateral = truncate(formatBigNumber(String(lm.total_collateral)), 16).padEnd(16);
+        const maintenanceMargin = truncate(formatBigNumber(String(lm.maintenance_margin)), 18).padEnd(18);
         
         // Calculate health status
         const collateral = BigInt(lm.total_collateral as string || '0');
