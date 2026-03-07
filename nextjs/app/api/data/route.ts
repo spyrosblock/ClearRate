@@ -77,7 +77,7 @@ export async function GET() {
       output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
     } else {
       // Table header
-      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate    │ Direction   │ Start              │ Maturity           │ Active │';
+      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start              │ Maturity          │ Active │';
       output += header + '\n';
       output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(7) + '┤\n';
 
@@ -133,9 +133,9 @@ export async function GET() {
     if (liquidationMonitoring.length === 0) {
       output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
     } else {
-      const header = '│ ID │ Account ID     │ Collateral Token   │ Total Collateral │ Maintenance Margin │ Health    │ Updated            │';
+      const header = '│ ID │ Account ID     │ Collateral Token   │ Total Collateral │ Maintenance Margin │ Health   │ Updated            │';
       output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(18) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(19) + '┤\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(18) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(21) + '┤\n';
 
       for (const lm of liquidationMonitoring) {
         const id = String(lm.id).padEnd(2).slice(0, 2);
