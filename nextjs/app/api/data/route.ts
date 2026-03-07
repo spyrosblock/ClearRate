@@ -5,233 +5,166 @@ import { sql } from '@/lib/db';
  * GET /api/data
  * 
  * Fetches all data from the 3 main tables: swap_positions, users, and liquidation_monitoring.
- * Returns a nicely structured response with all data combined.
- * 
- * Response structure:
- * - success: boolean indicating operation success
- * - data: object containing:
- *   - swapPositions: array of swap position records
- *   - users: array of user records
- *   - liquidationMonitoring: array of liquidation monitoring records
- * - summary: object with counts and statistics
+ * Returns a formatted plain text response with ASCII tables for terminal viewing.
  */
 export async function GET() {
   try {
     // Fetch all data from the 3 tables in parallel
     const [swapPositions, users, liquidationMonitoring] = await Promise.all([
-      sql`
-        SELECT 
-          id,
-          token_id,
-          owner_id,
-          balance,
-          notional,
-          fixed_rate_bps,
-          start_date,
-          maturity_date,
-          payment_interval,
-          direction,
-          floating_rate_index,
-          day_count_convention,
-          collateral_token,
-          active,
-          last_npv,
-          created_at,
-          updated_at
-        FROM swap_positions
-        ORDER BY created_at DESC
-      `,
-      sql`
-        SELECT 
-          id,
-          address,
-          account_id,
-          company_name,
-          registration_number,
-          registered_country,
-          contact_email,
-          lei,
-          website,
-          articles_of_association,
-          certificate_of_incorporation,
-          vat_certificate,
-          iban,
-          bic,
-          approved,
-          valid_until,
-          max_notional,
-          notional,
-          created_at,
-          updated_at
-        FROM users
-        ORDER BY created_at DESC
-      `,
-      sql`
-        SELECT 
-          id,
-          account_id,
-          total_collateral,
-          maintenance_margin,
-          collateral_token,
-          created_at,
-          updated_at
-        FROM liquidation_monitoring
-        ORDER BY updated_at DESC
-      `,
+      sql`SELECT * FROM swap_positions ORDER BY created_at DESC`,
+      sql`SELECT * FROM users ORDER BY created_at DESC`,
+      sql`SELECT * FROM liquidation_monitoring ORDER BY updated_at DESC`,
     ]);
 
-    // Calculate summary statistics
-    const totalNotional = swapPositions.reduce((sum, pos) => {
-      return sum + BigInt(pos.notional as string);
-    }, BigInt(0));
-
-    const activePositions = swapPositions.filter((pos) => pos.active as boolean).length;
-    const approvedUsers = users.filter((user) => user.approved as boolean).length;
-    const totalCollateral = liquidationMonitoring.reduce((sum, lm) => {
-      return sum + BigInt(lm.total_collateral as string);
-    }, BigInt(0));
-    const totalMaintenanceMargin = liquidationMonitoring.reduce((sum, lm) => {
-      return sum + BigInt(lm.maintenance_margin as string);
-    }, BigInt(0));
-
-    // Helper function to format timestamps
-    const formatTimestamp = (timestamp: Date | string | null) => {
-      if (!timestamp) return null;
-      return new Date(timestamp).toISOString();
+    // Helper to format timestamp
+    const formatTs = (ts: unknown) => {
+      if (!ts) return 'N/A';
+      try {
+        return new Date(ts as Date | string).toISOString().slice(0, 19).replace('T', ' ');
+      } catch {
+        return String(ts);
+      }
     };
 
-    // Helper function to format direction
-    const formatDirection = (direction: number) => {
-      return direction === 0 ? 'PAY_FIXED' : 'RECEIVE_FIXED';
+    // Helper to truncate string
+    const truncate = (str: string, maxLen: number) => {
+      if (!str) return '';
+      return str.length > maxLen ? str.slice(0, maxLen - 3) + '...' : str;
     };
 
-    // Helper function to format day count convention
-    const formatDayCountConvention = (convention: number) => {
+    // Helper to format direction
+    const formatDirection = (d: unknown) => d === 0 ? 'PAY_FIXED' : 'RECV_FIXED';
+
+    // Helper to format day count
+    const formatDayCount = (d: unknown) => {
       const conventions = ['ACT/360', 'ACT/365', '30/360'];
-      return conventions[convention] || 'UNKNOWN';
+      return conventions[d as number] || 'UNKNOWN';
     };
 
-    // Format swap positions for better readability
-    const formattedSwapPositions = swapPositions.map((pos) => ({
-      id: pos.id as number,
-      tokenId: pos.token_id as string,
-      ownerId: pos.owner_id as string,
-      balance: pos.balance as string,
-      notional: pos.notional as string,
-      fixedRateBps: pos.fixed_rate_bps as number,
-      fixedRatePercent: ((pos.fixed_rate_bps as number) / 100).toFixed(2) + '%',
-      startDate: formatTimestamp(pos.start_date as Date | string),
-      maturityDate: formatTimestamp(pos.maturity_date as Date | string),
-      paymentIntervalSeconds: pos.payment_interval as string,
-      direction: formatDirection(pos.direction as number),
-      directionCode: pos.direction as number,
-      floatingRateIndex: pos.floating_rate_index as string,
-      dayCountConvention: formatDayCountConvention(pos.day_count_convention as number),
-      dayCountConventionCode: pos.day_count_convention as number,
-      collateralToken: pos.collateral_token as string,
-      active: pos.active as boolean,
-      lastNpv: pos.last_npv as string,
-      createdAt: formatTimestamp(pos.created_at as Date | string),
-      updatedAt: formatTimestamp(pos.updated_at as Date | string),
-    }));
+    let output = '';
 
-    // Format users for better readability
-    const formattedUsers = users.map((user) => ({
-      id: user.id as number,
-      address: user.address as string,
-      accountId: user.account_id as string | null,
-      companyName: user.company_name as string,
-      registrationNumber: user.registration_number as string,
-      registeredCountry: user.registered_country as string,
-      contactEmail: user.contact_email as string,
-      lei: user.lei as string,
-      website: user.website as string,
-      documents: {
-        articlesOfAssociation: user.articles_of_association as string | null,
-        certificateOfIncorporation: user.certificate_of_incorporation as string | null,
-        vatCertificate: user.vat_certificate as string | null,
-      },
-      banking: {
-        iban: user.iban as string,
-        bic: user.bic as string,
-      },
-      status: {
-        approved: user.approved as boolean,
-        validUntil: formatTimestamp(user.valid_until as Date | string | null),
-      },
-      limits: {
-        maxNotional: user.max_notional as string,
-        currentNotional: user.notional as string,
-        availableNotional: (BigInt(user.max_notional as string) - BigInt(user.notional as string)).toString(),
-      },
-      createdAt: formatTimestamp(user.created_at as Date | string),
-      updatedAt: formatTimestamp(user.updated_at as Date | string),
-    }));
+    // Header
+    output += '\n' + '='.repeat(100) + '\n';
+    output += '                              CLEARRATE DATABASE SNAPSHOT\n';
+    output += '='.repeat(100) + '\n';
+    output += `Generated at: ${new Date().toISOString()}\n\n`;
 
-    // Format liquidation monitoring records for better readability
-    const formattedLiquidationMonitoring = liquidationMonitoring.map((lm) => {
-      const collateral = BigInt(lm.total_collateral as string);
-      const mm = BigInt(lm.maintenance_margin as string);
-      const isUnderCollateralized = collateral < mm;
-      
-      return {
-        id: lm.id as number,
-        accountId: lm.account_id as string,
-        collateral: {
-          total: lm.total_collateral as string,
-          maintenanceMargin: lm.maintenance_margin as string,
-        },
-        collateralToken: lm.collateral_token as string,
-        healthStatus: {
-          isUnderCollateralized,
-          marginRatio: mm > BigInt(0) ? ((collateral * BigInt(100)) / mm).toString() + '%' : 'N/A',
-        },
-        createdAt: formatTimestamp(lm.created_at as Date | string),
-        updatedAt: formatTimestamp(lm.updated_at as Date | string),
-      };
+    // ============ SWAP POSITIONS TABLE ============
+    output += '┌' + '─'.repeat(98) + '┐\n';
+    output += '│' + ' SWAP POSITIONS'.padEnd(98) + '│\n';
+    output += '├' + '─'.repeat(98) + '┤\n';
+
+    if (swapPositions.length === 0) {
+      output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
+    } else {
+      // Table header
+      const header = '│ ID │ Token ID        │ Owner ID       │ Notional        │ Rate    │ Direction   │ Start              │ Maturity           │ Active │';
+      output += header + '\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(7) + '┤\n';
+
+      for (const pos of swapPositions) {
+        const id = String(pos.id).padEnd(2).slice(0, 2);
+        const tokenId = truncate(String(pos.token_id), 14).padEnd(14);
+        const ownerId = truncate(String(pos.owner_id), 13).padEnd(13);
+        const notional = truncate(String(pos.notional), 14).padEnd(14);
+        const rate = (String(pos.fixed_rate_bps / 100) + '%').padEnd(6);
+        const direction = formatDirection(pos.direction).padEnd(10);
+        const startDate = formatTs(pos.start_date).slice(0, 19);
+        const maturityDate = formatTs(pos.maturity_date).slice(0, 19);
+        const active = pos.active ? 'Yes' : 'No';
+
+        output += `│ ${id} │ ${tokenId} │ ${ownerId} │ ${notional} │ ${rate} │ ${direction} │ ${startDate} │ ${maturityDate} │ ${active.padEnd(5)} │\n`;
+      }
+    }
+    output += '└' + '─'.repeat(98) + '┘\n';
+    output += `Total: ${swapPositions.length} | Active: ${swapPositions.filter(p => p.active).length} | Inactive: ${swapPositions.filter(p => !p.active).length}\n\n`;
+
+    // ============ USERS TABLE ============
+    output += '┌' + '─'.repeat(98) + '┐\n';
+    output += '│' + ' USERS'.padEnd(98) + '│\n';
+    output += '├' + '─'.repeat(98) + '┤\n';
+
+    if (users.length === 0) {
+      output += '│' + ' (no users found)'.padEnd(98) + '│\n';
+    } else {
+      const header = '│ ID │ Address         │ Company Name           │ Country │ Email                    │ Approved │ Max Notional     │';
+      output += header + '\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(17) + '┤\n';
+
+      for (const user of users) {
+        const id = String(user.id).padEnd(2).slice(0, 2);
+        const address = truncate(String(user.address), 14).padEnd(14);
+        const company = truncate(String(user.company_name), 21).padEnd(21);
+        const country = String(user.registered_country).padEnd(6);
+        const email = truncate(String(user.contact_email), 23).padEnd(23);
+        const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(7);
+        const maxNotional = truncate(String(user.max_notional || '0'), 15).padEnd(15);
+
+        output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
+      }
+    }
+    output += '└' + '─'.repeat(98) + '┘\n';
+    output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
+
+    // ============ LIQUIDATION MONITORING TABLE ============
+    output += '┌' + '─'.repeat(98) + '┐\n';
+    output += '│' + ' LIQUIDATION MONITORING'.padEnd(98) + '│\n';
+    output += '├' + '─'.repeat(98) + '┤\n';
+
+    if (liquidationMonitoring.length === 0) {
+      output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
+    } else {
+      const header = '│ ID │ Account ID      │ Collateral Token    │ Total Collateral  │ Maintenance Margin │ Health    │ Updated            │';
+      output += header + '\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(18) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(19) + '┤\n';
+
+      for (const lm of liquidationMonitoring) {
+        const id = String(lm.id).padEnd(2).slice(0, 2);
+        const accountId = truncate(String(lm.account_id), 14).padEnd(14);
+        const collateralToken = truncate(String(lm.collateral_token), 18).padEnd(18);
+        const totalCollateral = truncate(String(lm.total_collateral), 16).padEnd(16);
+        const maintenanceMargin = truncate(String(lm.maintenance_margin), 18).padEnd(18);
+        
+        // Calculate health status
+        const collateral = BigInt(lm.total_collateral as string || '0');
+        const mm = BigInt(lm.maintenance_margin as string || '0');
+        const health = collateral >= mm ? '✓ OK' : '⚠ AT RISK';
+        
+        const updated = formatTs(lm.updated_at).slice(0, 19);
+
+        output += `│ ${id} │ ${accountId} │ ${collateralToken} │ ${totalCollateral} │ ${maintenanceMargin} │ ${health.padEnd(8)} │ ${updated} │\n`;
+      }
+    }
+    output += '└' + '─'.repeat(98) + '┘\n';
+
+    const underCollateralized = liquidationMonitoring.filter(lm => {
+      const collateral = BigInt(lm.total_collateral as string || '0');
+      const mm = BigInt(lm.maintenance_margin as string || '0');
+      return collateral < mm;
+    }).length;
+
+    output += `Total Accounts: ${liquidationMonitoring.length} | Under-collateralized: ${underCollateralized}\n\n`;
+
+    // Footer
+    output += '='.repeat(100) + '\n';
+
+    return new NextResponse(output, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
     });
-
-    const response = {
-      success: true,
-      data: {
-        swapPositions: formattedSwapPositions,
-        users: formattedUsers,
-        liquidationMonitoring: formattedLiquidationMonitoring,
-      },
-      summary: {
-        swapPositions: {
-          total: swapPositions.length,
-          active: activePositions,
-          inactive: swapPositions.length - activePositions,
-          totalNotional: totalNotional.toString(),
-        },
-        users: {
-          total: users.length,
-          approved: approvedUsers,
-          pending: users.length - approvedUsers,
-        },
-        liquidationMonitoring: {
-          totalAccounts: liquidationMonitoring.length,
-          totalCollateral: totalCollateral.toString(),
-          totalMaintenanceMargin: totalMaintenanceMargin.toString(),
-          underCollateralizedAccounts: formattedLiquidationMonitoring.filter(
-            (lm) => lm.healthStatus.isUnderCollateralized
-          ).length,
-        },
-        timestamp: new Date().toISOString(),
-      },
-    };
-
-    return NextResponse.json(response);
   } catch (error) {
     console.error('Error fetching data:', error);
     
-    return NextResponse.json(
-      { 
-        success: false,
-        error: 'Failed to fetch data from database' 
+    const errorOutput = '\n' + '='.repeat(50) + '\n' +
+      'ERROR: Failed to fetch data from database\n' +
+      '='.repeat(50) + '\n';
+    
+    return new NextResponse(errorOutput, {
+      status: 500,
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
       },
-      { status: 500 }
-    );
+    });
   }
 }
