@@ -11,9 +11,9 @@ export async function GET() {
   try {
     // Fetch all data from the 3 tables in parallel
     const [swapPositions, users, liquidationMonitoring] = await Promise.all([
-      sql`SELECT * FROM swap_positions ORDER BY created_at DESC`,
-      sql`SELECT * FROM users ORDER BY created_at DESC`,
-      sql`SELECT * FROM liquidation_monitoring ORDER BY updated_at DESC`,
+      sql`SELECT * FROM swap_positions ORDER BY created_at ASC`,
+      sql`SELECT * FROM users ORDER BY created_at ASC`,
+      sql`SELECT * FROM liquidation_monitoring ORDER BY created_at ASC`,
     ]);
 
     // Helper to format timestamp
