@@ -176,9 +176,6 @@ export async function GET() {
 
     output += `Total Accounts: ${liquidationMonitoring.length} | Under-collateralized: ${underCollateralized}\n\n`;
 
-    // Footer
-    output += '='.repeat(100) + '\n';
-
     return new NextResponse(output, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
