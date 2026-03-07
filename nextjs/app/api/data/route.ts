@@ -139,9 +139,9 @@ export async function GET() {
 
 
     // ============ LIQUIDATION MONITORING TABLE ============
-    output += '┌' + '─'.repeat(98) + '┐\n';
+    output += '┌' + '─'.repeat(104) + '┐\n';
     output += '│' + ' LIQUIDATION MONITORING'.padEnd(98) + '│\n';
-    output += '├' + '─'.repeat(98) + '┤\n';
+    output += '├' + '─'.repeat(105) + '┤\n';
 
     if (liquidationMonitoring.length === 0) {
       output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
@@ -167,7 +167,7 @@ export async function GET() {
         output += `│ ${id} │ ${accountId} │ ${collateralToken} │ ${totalCollateral} │ ${maintenanceMargin} │ ${health.padEnd(8)} │ ${updated} │\n`;
       }
     }
-    output += '└' + '─'.repeat(98) + '┘\n';
+    output += '└' + '─'.repeat(105) + '┘\n';
 
     const underCollateralized = liquidationMonitoring.filter(lm => {
       const collateral = BigInt(lm.total_collateral as string || '0');
