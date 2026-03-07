@@ -80,6 +80,33 @@ export async function GET() {
     output += '='.repeat(100) + '\n';
     output += `Generated at: ${new Date().toISOString()}\n\n`;
 
+    // ============ USERS TABLE ============
+    output += '┌' + '─'.repeat(98) + '┐\n';
+    output += '│' + ' USERS'.padEnd(98) + '│\n';
+    output += '├' + '─'.repeat(98) + '┤\n';
+
+    if (users.length === 0) {
+      output += '│' + ' (no users found)'.padEnd(98) + '│\n';
+    } else {
+      const header = '│ ID │ Address         │ Company Name           │ Country │ Email                    │ Approved │ Max Notional     │';
+      output += header + '\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(17) + '┤\n';
+
+      for (const user of users) {
+        const id = String(user.id).padEnd(2).slice(0, 2);
+        const address = formatId(String(user.address)).padEnd(14);
+        const company = truncate(String(user.company_name), 21).padEnd(21);
+        const country = String(user.registered_country).padEnd(6);
+        const email = truncate(String(user.contact_email), 23).padEnd(23);
+        const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(7);
+        const maxNotional = truncate(formatBigNumber(String(user.max_notional || '0')), 15).padEnd(15);
+
+        output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
+      }
+    }
+    output += '└' + '─'.repeat(98) + '┘\n';
+    output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
+
     // ============ SWAP POSITIONS TABLE ============
     output += '┌' + '─'.repeat(98) + '┐\n';
     output += '│' + ' SWAP POSITIONS'.padEnd(98) + '│\n';
@@ -110,32 +137,6 @@ export async function GET() {
     output += '└' + '─'.repeat(98) + '┘\n';
     output += `Total: ${swapPositions.length} | Active: ${swapPositions.filter(p => p.active).length} | Inactive: ${swapPositions.filter(p => !p.active).length}\n\n`;
 
-    // ============ USERS TABLE ============
-    output += '┌' + '─'.repeat(98) + '┐\n';
-    output += '│' + ' USERS'.padEnd(98) + '│\n';
-    output += '├' + '─'.repeat(98) + '┤\n';
-
-    if (users.length === 0) {
-      output += '│' + ' (no users found)'.padEnd(98) + '│\n';
-    } else {
-      const header = '│ ID │ Address         │ Company Name           │ Country │ Email                    │ Approved │ Max Notional     │';
-      output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(17) + '┤\n';
-
-      for (const user of users) {
-        const id = String(user.id).padEnd(2).slice(0, 2);
-        const address = formatId(String(user.address)).padEnd(14);
-        const company = truncate(String(user.company_name), 21).padEnd(21);
-        const country = String(user.registered_country).padEnd(6);
-        const email = truncate(String(user.contact_email), 23).padEnd(23);
-        const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(7);
-        const maxNotional = truncate(formatBigNumber(String(user.max_notional || '0')), 15).padEnd(15);
-
-        output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
-      }
-    }
-    output += '└' + '─'.repeat(98) + '┘\n';
-    output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
 
     // ============ LIQUIDATION MONITORING TABLE ============
     output += '┌' + '─'.repeat(98) + '┐\n';
