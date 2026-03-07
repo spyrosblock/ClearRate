@@ -89,9 +89,9 @@ export async function GET() {
       output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
     } else {
       // Table header
-      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start             │ Maturity         │ Active │';
+      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start             │ Maturity          │ Active │';
       output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(7) + '┤\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(8) + '┤\n';
 
       for (const pos of swapPositions) {
         const id = String(pos.id).padEnd(2).slice(0, 2);
@@ -104,7 +104,7 @@ export async function GET() {
         const maturityDate = formatTs(pos.maturity_date).slice(0, 19);
         const active = pos.active ? 'Yes' : 'No';
 
-        output += `│ ${id} │ ${tokenId} │ ${ownerId} │ ${notional} │ ${rate} │ ${direction} │ ${startDate} │ ${maturityDate} │ ${active.padEnd(5)} │\n`;
+        output += `│ ${id} │ ${tokenId} │ ${ownerId} │ ${notional} │ ${rate} │ ${direction} │ ${startDate} │ ${maturityDate} │ ${active.padEnd(6)} │\n`;
       }
     }
     output += '└' + '─'.repeat(98) + '┘\n';
