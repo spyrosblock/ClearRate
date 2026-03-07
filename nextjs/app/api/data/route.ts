@@ -60,6 +60,18 @@ export async function GET() {
       return conventions[d as number] || 'UNKNOWN';
     };
 
+    // Helper to format account/tx IDs as 0x...12345678
+    const formatId = (id: string) => {
+      if (!id) return '';
+      // If it starts with 0x, show 0x...last8chars
+      if (id.startsWith('0x') || id.startsWith('0X')) {
+        const last8 = id.slice(-8);
+        return `0x...${last8}`;
+      }
+      // Otherwise just show last 8 chars with prefix
+      return `0x...${id.slice(-8)}`;
+    };
+
     let output = '';
 
     // Header
@@ -83,8 +95,8 @@ export async function GET() {
 
       for (const pos of swapPositions) {
         const id = String(pos.id).padEnd(2).slice(0, 2);
-        const tokenId = truncate(String(pos.token_id), 14).padEnd(14);
-        const ownerId = truncate(String(pos.owner_id), 13).padEnd(13);
+        const tokenId = formatId(String(pos.token_id)).padEnd(14);
+        const ownerId = formatId(String(pos.owner_id)).padEnd(13);
         const notional = truncate(formatBigNumber(String(pos.notional)), 14).padEnd(14);
         const rate = (String(pos.fixed_rate_bps / 100) + '%').padEnd(6);
         const direction = formatDirection(pos.direction).padEnd(10);
@@ -112,7 +124,7 @@ export async function GET() {
 
       for (const user of users) {
         const id = String(user.id).padEnd(2).slice(0, 2);
-        const address = truncate(String(user.address), 14).padEnd(14);
+        const address = formatId(String(user.address)).padEnd(14);
         const company = truncate(String(user.company_name), 21).padEnd(21);
         const country = String(user.registered_country).padEnd(6);
         const email = truncate(String(user.contact_email), 23).padEnd(23);
@@ -133,14 +145,14 @@ export async function GET() {
     if (liquidationMonitoring.length === 0) {
       output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
     } else {
-      const header = '│ ID │ Account ID     │ Collateral Token   │ Total Collateral │ Maintenance Margin │ Health   │ Updated            │';
+      const header = '│ ID │ Account ID     │ Collateral Token   │ Total Collateral │ Maintenance Margin │ Health   │ Updated             │';
       output += header + '\n';
       output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(18) + '┼' + '─'.repeat(20) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(21) + '┤\n';
 
       for (const lm of liquidationMonitoring) {
         const id = String(lm.id).padEnd(2).slice(0, 2);
-        const accountId = truncate(String(lm.account_id), 14).padEnd(14);
-        const collateralToken = truncate(String(lm.collateral_token), 18).padEnd(18);
+        const accountId = formatId(String(lm.account_id)).padEnd(14);
+        const collateralToken = formatId(String(lm.collateral_token)).padEnd(18);
         const totalCollateral = truncate(formatBigNumber(String(lm.total_collateral)), 16).padEnd(16);
         const maintenanceMargin = truncate(formatBigNumber(String(lm.maintenance_margin)), 18).padEnd(18);
         
