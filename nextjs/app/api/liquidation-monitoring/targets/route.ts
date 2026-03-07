@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 
+// Default start premium in basis points (500 = 5%)
+const DEFAULT_START_PREMIUM_BPS = 500;
+
 /**
  * Get Liquidation Targets API
  *
@@ -16,7 +19,8 @@ import { sql } from '@/lib/db';
  *     accountId: string,
  *     collateralToken: string,
  *     totalCollateral: string,
- *     maintenanceMargin: string
+ *     maintenanceMargin: string,
+ *     startPremiumBps: number
  *   }>,
  *   count?: number,
  *   message?: string
@@ -40,6 +44,7 @@ export async function GET(request: NextRequest) {
       collateralToken: row.collateralToken,
       totalCollateral: row.totalCollateral,
       maintenanceMargin: row.maintenanceMargin,
+      startPremiumBps: DEFAULT_START_PREMIUM_BPS,
     }));
 
     console.log(
