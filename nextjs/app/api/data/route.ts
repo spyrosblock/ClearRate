@@ -122,7 +122,7 @@ export async function GET() {
 
       for (const pos of swapPositions) {
         const id = String(pos.id).padEnd(2).slice(0, 2);
-        const tokenId = formatId(String(pos.token_id)).padEnd(14);
+        const tokenId = truncate(String(pos.token_id), 14).padEnd(14);
         const ownerId = formatId(String(pos.owner_id)).padEnd(13);
         const notional = truncate(formatBigNumber(String(pos.notional)), 14).padEnd(14);
         const rate = (String(pos.fixed_rate_bps / 100) + '%').padEnd(6);
@@ -153,7 +153,7 @@ export async function GET() {
       for (const lm of liquidationMonitoring) {
         const id = String(lm.id).padEnd(2).slice(0, 2);
         const accountId = formatId(String(lm.account_id)).padEnd(14);
-        const collateralToken = formatId(String(lm.collateral_token)).padEnd(18);
+        const collateralToken = truncate(String(lm.collateral_token), 18).padEnd(18);
         const totalCollateral = truncate(formatBigNumber(String(lm.total_collateral)), 16).padEnd(16);
         const maintenanceMargin = truncate(formatBigNumber(String(lm.maintenance_margin)), 18).padEnd(18);
         
