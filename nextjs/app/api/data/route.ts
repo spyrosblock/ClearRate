@@ -89,7 +89,7 @@ export async function GET() {
       output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
     } else {
       // Table header
-      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start              │ Maturity          │ Active │';
+      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start             │ Maturity         │ Active │';
       output += header + '\n';
       output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(7) + '┤\n';
 
