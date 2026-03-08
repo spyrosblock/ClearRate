@@ -81,14 +81,14 @@ export async function GET() {
     output += `Generated at: ${new Date().toISOString()}\n\n`;
 
     // ============ USERS TABLE ============
-    output += '┌' + '─'.repeat(98) + '┐\n';
-    output += '│' + ' USERS'.padEnd(98) + '│\n';
-    output += '├' + '─'.repeat(98) + '┤\n';
+    output += '┌' + '─'.repeat(110) + '┐\n';
+    output += '│' + ' USERS'.padEnd(110) + '│\n';
+    output += '├' + '─'.repeat(110) + '┤\n';
 
     if (users.length === 0) {
-      output += '│' + ' (no users found)'.padEnd(98) + '│\n';
+      output += '│' + ' (no users found)'.padEnd(110) + '│\n';
     } else {
-      const header = '│ ID │ Address        │ Company Name          │ Country │ Email                   │ Approved │ Max Notional     │';
+      const header = '│ ID │ Address        │ Company Name          │ Country │ Email                   │ Approved │ Max Notional    │';
       output += header + '\n';
       output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(17) + '┤\n';
 
@@ -104,7 +104,7 @@ export async function GET() {
         output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
       }
     }
-    output += '└' + '─'.repeat(98) + '┘\n';
+    output += '└' + '─'.repeat(110) + '┘\n';
     output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
 
     // ============ SWAP POSITIONS TABLE ============
@@ -113,12 +113,12 @@ export async function GET() {
     output += '├' + '─'.repeat(129) + '┤\n';
 
     if (swapPositions.length === 0) {
-      output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
+      output += '│' + ' (no positions found)'.padEnd(129) + '│\n';
     } else {
       // Table header
-      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start               │ Maturity          │ Active │';
+      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start               │ Maturity            │ Active │';
       output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(21) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(8) + '┤\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(21) + '┼' + '─'.repeat(21) + '┼' + '─'.repeat(8) + '┤\n';
 
       for (const pos of swapPositions) {
         const id = String(pos.id).padEnd(2).slice(0, 2);
