@@ -88,7 +88,7 @@ export async function GET() {
     if (users.length === 0) {
       output += '│' + ' (no users found)'.padEnd(98) + '│\n';
     } else {
-      const header = '│ ID │ Address         │ Company Name           │ Country │ Email                    │ Approved │ Max Notional     │';
+      const header = '│ ID │ Address        │ Company Name          │ Country │ Email                   │ Approved │ Max Notional     │';
       output += header + '\n';
       output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(17) + '┤\n';
 
@@ -108,9 +108,9 @@ export async function GET() {
     output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
 
     // ============ SWAP POSITIONS TABLE ============
-    output += '┌' + '─'.repeat(98) + '┐\n';
-    output += '│' + ' SWAP POSITIONS'.padEnd(98) + '│\n';
-    output += '├' + '─'.repeat(98) + '┤\n';
+    output += '┌' + '─'.repeat(115) + '┐\n';
+    output += '│' + ' SWAP POSITIONS'.padEnd(115) + '│\n';
+    output += '├' + '─'.repeat(115) + '┤\n';
 
     if (swapPositions.length === 0) {
       output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
@@ -134,14 +134,14 @@ export async function GET() {
         output += `│ ${id} │ ${tokenId} │ ${ownerId} │ ${notional} │ ${rate} │ ${direction} │ ${startDate} │ ${maturityDate} │ ${active.padEnd(6)} │\n`;
       }
     }
-    output += '└' + '─'.repeat(98) + '┘\n';
+    output += '└' + '─'.repeat(115) + '┘\n';
     output += `Total: ${swapPositions.length} | Active: ${swapPositions.filter(p => p.active).length} | Inactive: ${swapPositions.filter(p => !p.active).length}\n\n`;
 
 
     // ============ LIQUIDATION MONITORING TABLE ============
-    output += '┌' + '─'.repeat(104) + '┐\n';
-    output += '│' + ' LIQUIDATION MONITORING'.padEnd(98) + '│\n';
-    output += '├' + '─'.repeat(105) + '┤\n';
+    output += '┌' + '─'.repeat(115) + '┐\n';
+    output += '│' + ' LIQUIDATION MONITORING'.padEnd(105) + '│\n';
+    output += '├' + '─'.repeat(115) + '┤\n';
 
     if (liquidationMonitoring.length === 0) {
       output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
