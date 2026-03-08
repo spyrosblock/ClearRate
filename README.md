@@ -534,6 +534,7 @@ This project is currently **UNLICENSED**. All rights reserved.
 
 ## 📞 Contact
 
+- **Email**: [spyrosblock@gmail.com](mailto:spyrosblock@gmail.com)
 - **GitHub**: [spyrosblock/ClearRate](https://github.com/spyrosblock/ClearRate)
 - **Issues**: [GitHub Issues](https://github.com/spyrosblock/ClearRate/issues)
 
