@@ -54,8 +54,6 @@ contract ClearingHouseIntegrationTest is Test {
     bytes32 internal constant SOFR_INDEX = keccak256("SOFR");
 
     // ─── Role Constants ─────────────────────────────────────────────────
-    bytes32 internal constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
     bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
@@ -138,11 +136,6 @@ contract ClearingHouseIntegrationTest is Test {
         vm.startPrank(admin);
         clearingHouse.grantRole(clearingHouse.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
         marginVault.grantRole(marginVault.LIQUIDATION_ENGINE_ROLE(), address(liquidationEngine));
-
-        // Grant operator & settler roles - forwarder needs OPERATOR_ROLE to call onReport
-        clearingHouse.grantRole(OPERATOR_ROLE, forwarder);
-        clearingHouse.grantRole(OPERATOR_ROLE, operator);
-        clearingHouse.grantRole(SETTLEMENT_ROLE, settler);
         vm.stopPrank();
 
         // Fund margin accounts with USDC

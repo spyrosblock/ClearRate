@@ -40,7 +40,7 @@ contract IRSInstrument is ERC1155, AccessControl {
         uint8 dayCountConvention;  // 0=ACT/360, 1=ACT/365, 2=30/360
         address collateralToken;   // Address of the collateral ERC-20 token used for margin and payments
         bool active;               // Whether the swap is active
-        int256 lastNpv;           // Last Net Present Value (NPV) of the swap
+        int256 lastNpv;            // Last Net Present Value (NPV) of the swap
     }
 
     // ─── State ──────────────────────────────────────────────────────────

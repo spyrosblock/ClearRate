@@ -18,18 +18,13 @@ import {LiquidationEngine} from "../src/liquidation/LiquidationEngine.sol";
 /// 1. Whitelist - KYC/governance-controlled address registry
 /// 2. MarginVault - Margin ledger
 /// 3. RiskEngine - IM/MM validation
-/// 4. YieldCurveOracle - Discount factor oracle
-/// 5. IRSInstrument - ERC-1155 position tokens
-/// 6. ClearingHouse - Trade novation and coordination
-/// 7. InsuranceFund - Backstop capital
-/// 8. LiquidationEngine - Dutch auction liquidations
+/// 4. IRSInstrument - ERC-1155 position tokens
+/// 5. ClearingHouse - Trade novation and coordination
+/// 6. LiquidationEngine - Auction liquidations
 contract Deploy is ClearRateScript {
     // ─── Role Constants ─────────────────────────────────────────────────
-    bytes32 internal constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    bytes32 internal constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 internal constant CLEARING_HOUSE_ROLE = keccak256("CLEARING_HOUSE_ROLE");
     bytes32 internal constant RISK_ADMIN_ROLE = keccak256("RISK_ADMIN_ROLE");
-    bytes32 internal constant FUND_MANAGER_ROLE = keccak256("FUND_MANAGER_ROLE");
     bytes32 internal constant WHITELIST_ADMIN_ROLE = keccak256("WHITELIST_ADMIN_ROLE");
     bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
@@ -39,7 +34,6 @@ contract Deploy is ClearRateScript {
 
     // ─── Liquidation Parameters ────────────────────────────────────────
     uint256 internal constant AUCTION_DURATION = 1 days;
-    uint256 internal constant START_PREMIUM_BPS = 500;
 
     /// @notice Main entry point for deployment.
     function run() external {

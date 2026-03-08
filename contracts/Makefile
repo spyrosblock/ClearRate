@@ -25,13 +25,6 @@ test-sepolia:
 	forge test --fork-url sepolia --via-ir -vv
 
 # ============================================
-# FORMATTING
-# ============================================
-
-format:
-	forge fmt
-
-# ============================================
 # DEPLOYMENT (Ethereum Sepolia)
 # ============================================
 
@@ -65,7 +58,6 @@ deploy-contracts-sepolia:
 
 update-config-addresses:
 	@node scripts-js/updateConfigAddresses.js
-
 
 # ============================================
 # UPDATE CONFIG ADDRESSES

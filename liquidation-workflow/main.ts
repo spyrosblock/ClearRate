@@ -158,7 +158,7 @@ const fetchLiquidationTargets = (
  * through the KeystoneForwarder → consumer contract flow.
  *
  * The encoded payload matches the `_processReport(bytes)` signature with reportType = 0.
- * ReportType = 0: Liquidate accounts (starts Dutch auctions for undercollateralized accounts)
+ * ReportType = 0: Liquidate accounts (starts auctions for undercollateralized accounts)
  */
 const writeLiquidationReport = (
 	runtime: Runtime<Config>,

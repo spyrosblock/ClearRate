@@ -11,33 +11,6 @@
 	workflow-install
 
 # ===============================================
-# HELP
-# ===============================================
-
-help:
-	@echo "ClearRate CCP Workflow Makefile"
-	@echo "================================"
-	@echo ""
-	@echo "Lifecycle Steps (in order):"
-	@echo "  1. make deploy-contracts    - Deploy contracts to Sepolia"
-	@echo "  2. make whitelist-users     - Whitelist user 1 and user 2"
-	@echo "  3. make deposit-margin      - Mint mock tokens and deposit collateral"
-	@echo "  4. make store-logs          - Store MarginDeposited event logs"
-	@echo "  5. make create-trade-json   - Generate trade JSON file"
-	@echo "  6. make create-trade        - Create the swap via CRE API"
-	@echo "  7. make store-logs          - Store TradeNovated event logs"
-	@echo "  8. make settle-vm           - Settle variation margin daily"
-	@echo "  9. make store-logs          - Store PositionMatured event logs"
-	@echo "  10. make withdraw-margin    - Withdraw collateral after settlement"
-	@echo ""
-	@echo "Read Commands:"
-	@echo "  make get-margin-data        - Get free margin data for all users"
-	@echo ""
-	@echo "Utilities:"
-	@echo "  make workflow-install       - Install dependencies for all workflows"
-	@echo ""
-
-# ===============================================
 # WORKFLOW INSTALLATION
 # ===============================================
 
@@ -72,7 +45,7 @@ deploy-contracts:
 
 # IMPORTANT - After deploying, update the contracts/.env file
 
-# After undating the .env update the configs of the workflows
+# After undating the .env update the configs of the workflows with:
 update-config-addresses:
 	cd contracts && make update-config-addresses
 
@@ -136,10 +109,9 @@ settle-vm:
 # ===============================================
 
 # Final variation margin settlement for all positions
-# Store PositionMatured Event (11) - ClearingHouse.sol  13
-# Store PositionMatured Event (17) - ClearingHouse.sol  19
-# May need more PositionMatured Events                  25
-#    if a swap position has been partially transfered
+# Store PositionMatured Event (11) - ClearingHouse.sol
+# Store PositionMatured Event (17) - ClearingHouse.sol
+# For the demo you need events 13, 19 and 25
 settle-vm-final:
 	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install

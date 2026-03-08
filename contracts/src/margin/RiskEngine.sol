@@ -111,7 +111,7 @@ contract RiskEngine is AccessControl {
     function calculateIM(
         uint256 notional,
         uint256 tenor
-    ) public view returns (uint256 im) {
+    ) external view returns (uint256 im) {
         uint256 weight = riskWeightBps[tenor];
         if (weight == 0) revert NoRiskWeightForTenor(tenor);
         im = (notional * weight * confidenceBps) / (BPS * BPS);
@@ -120,7 +120,7 @@ contract RiskEngine is AccessControl {
     /// @notice Calculate the maintenance margin for a given IM amount.
     /// @param im The initial margin amount.
     /// @return mm The maintenance margin requirement.
-    function calculateMM(uint256 im) public view returns (uint256 mm) {
+    function calculateMM(uint256 im) external view returns (uint256 mm) {
         mm = (im * maintenanceMarginRatioBps) / BPS;
     }
 

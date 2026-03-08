@@ -28,6 +28,11 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
         "MatchedTrade(bytes32 tradeId,bytes32 partyA,bytes32 partyB,uint256 notional,uint256 fixedRateBps,uint256 startDate,uint256 maturityDate,uint256 paymentInterval,uint8 dayCountConvention,bytes32 floatingRateIndex,uint256 nonce,uint256 deadline,address collateralToken)"
     );
 
+    /// @dev EIP-712 typehash for PositionTransfer struct.
+    bytes32 public constant POSITION_TRANSFER_TYPEHASH = keccak256(
+        "PositionTransfer(bytes32 toAccountId,uint256 tokenId,uint256 amount,uint256 nonce,uint256 deadline)"
+    );
+
     // ─── Structs ────────────────────────────────────────────────────────
 
     /// @notice Tracks the token pair created from a trade.
@@ -84,7 +89,233 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
         riskEngine = RiskEngine(riskEngine_);
         whitelist = Whitelist(whitelist_);
     }
-    
+
+    // ═══════════════════════════════════════════════════════════════════
+    // EXTERNAL FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ─── Position Transfer ─────────────────────────────────────
+
+    /// @notice Transfer a position (or part of it) to another account.
+    /// @dev Called by the account owner to transfer their position to another whitelisted account.
+    ///      The recipient must have signed the agreement (be whitelisted with valid KYC).
+    ///      The recipient must sign an EIP-712 message approving the transfer.
+    ///      Handles margin requirements, notional tracking, and ERC-1155 token transfer.
+    /// @param toAccountId The account receiving the position.
+    /// @param tokenId The token ID to transfer.
+    /// @param amount The amount (notional) to transfer.
+    /// @param nonce The nonce for replay protection.
+    /// @param deadline The deadline for the signature.
+    /// @param toSignature The recipient's EIP-712 signature approving the transfer.
+    function transferPosition(
+        bytes32 toAccountId,
+        uint256 tokenId,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata toSignature
+    ) external {
+        bytes32 fromAccountId = whitelist.getAccountId(msg.sender);
+        address fromOwner = msg.sender;
+
+        // ── Signature Verification ──
+        if (block.timestamp > deadline) revert SignatureExpired(deadline);
+        if (usedNonces[toAccountId][nonce]) revert NonceAlreadyUsed(toAccountId, nonce);
+        
+        bytes32 digest = _hashTypedDataV4(_positionTransferStructHash(toAccountId, tokenId, amount, nonce, deadline));
+        address signer = digest.recover(toSignature);
+        address toOwner = whitelist.getAccountOwner(toAccountId);
+        if (signer != toOwner) revert InvalidSignature(toAccountId);
+        
+        // Mark nonce as used
+        usedNonces[toAccountId][nonce] = true;
+
+        // ── Validate Recipient ──
+        if (toOwner == address(0)) revert AccountNotFound(toAccountId);
+        
+        // Check recipient is whitelisted and KYC is valid
+        if (!whitelist.isWhitelisted(toOwner)) revert RecipientNotWhitelisted(toAccountId);
+        
+        // ── Validate Position ──
+        if (amount == 0) revert InvalidNotional();
+        
+        IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
+        if (!terms.active) revert PositionNotActive(tokenId);
+        
+        // Check sender has sufficient balance
+        uint256 fromBalance = instrument.balanceOf(fromOwner, tokenId);
+        if (fromBalance < amount) revert InsufficientTokenBalance(tokenId, amount, fromBalance);
+        
+        // ── Check Recipient Notional Limit ──
+        if (!whitelist.checkNotionalLimit(toOwner, amount)) {
+            uint256 currentTotal = whitelist.getTotalOpenNotional(toOwner);
+            uint256 maxAllowed = whitelist.getMaxNotional(toOwner);
+            revert ExceedsMaxNotional(toAccountId, amount, currentTotal, maxAllowed);
+        }
+        
+        address collateralToken = terms.collateralToken;
+        uint256 tenor = terms.maturityDate - terms.startDate;
+
+        // ── Margin Adjustments ──
+        // Calculate IM required for the amount being transferred
+        uint256 imRequired = riskEngine.calculateIM(amount, tenor);
+        
+        // Release IM from sender
+        marginVault.releaseInitialMargin(fromAccountId, collateralToken, imRequired);
+
+        // Lock IM for recipient
+        marginVault.lockInitialMargin(toAccountId, collateralToken, imRequired);
+
+        // ── Transfer ERC-1155 Token ──
+        instrument.transferPosition(fromOwner, toOwner, tokenId, amount);
+
+        // ── Update Notional Tracking ──
+        whitelist.removeNotional(fromOwner, amount);
+        whitelist.addNotional(toOwner, amount);
+        
+        // ── Update Position Tracking ──
+        // Remove from sender's position list if fully transferred
+        if (fromBalance == amount) {
+            _removeTokenFromAccount(fromAccountId, collateralToken, tokenId);
+        }
+        
+        // Add to recipient's position list if not already there
+        bool found = false;
+        uint256[] storage toTokens = accountTokenIds[toAccountId][collateralToken];
+        for (uint256 i = 0; i < toTokens.length; i++) {
+            if (toTokens[i] == tokenId) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            toTokens.push(tokenId);
+        }
+        
+        // ── Update Maintenance Margins ──
+        uint256 newMMFrom = _updateAccountMaintenanceMargin(fromAccountId, collateralToken);
+        uint256 newMMTo = _updateAccountMaintenanceMargin(toAccountId, collateralToken);
+        
+        emit PositionTransferred(
+            tokenId,
+            fromAccountId,
+            toAccountId,
+            amount,
+            collateralToken,
+            newMMFrom,
+            newMMTo
+        );
+    }
+
+    // ─── Liquidation ────────────────────────────────────────────────────
+
+    /// @notice Transfer positions from a liquidated account to a liquidator.
+    /// @dev Called by the LiquidationEngine during absorbPosition.
+    ///      Handles the transfer of positions, margin requirements, and notional tracking.
+    ///      Also transfers ERC-1155 position tokens to maintain the invariant: token holder = position owner.
+    ///      Transfers the NPV of each position from liquidated account to liquidator (or vice versa).
+    ///      Also handles the liquidation premium payment to the liquidator.
+    /// @param liquidatedAccount The account being liquidated.
+    /// @param liquidatorAccountId The liquidator's account taking over positions.
+    /// @param collateralToken The collateral token for the liquidation.
+    /// @param imAmount The initial margin amount to lock for the liquidator.
+    /// @param premium The liquidation premium to pay to the liquidator.
+    /// @return tokenIds Array of tokenIds transferred.
+    function absorbPositions(
+        bytes32 liquidatedAccount,
+        bytes32 liquidatorAccountId,
+        address collateralToken,
+        uint256 imAmount,
+        uint256 premium
+    ) external onlyRole(LIQUIDATION_ENGINE_ROLE) returns (uint256[] memory tokenIds) {
+        // Get all positions for the liquidated account
+        uint256[] storage positions_ = accountTokenIds[liquidatedAccount][collateralToken];
+        
+        // Get owner addresses for token transfers
+        address liquidatedOwner = whitelist.getAccountOwner(liquidatedAccount);
+        address liquidatorOwner = whitelist.getAccountOwner(liquidatorAccountId);
+        
+        // Count active positions for this collateral token
+        uint256 activeCount;
+        for (uint256 i = 0; i < positions_.length; i++) {
+            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(positions_[i]);
+            if (terms.active && terms.collateralToken == collateralToken) {
+                activeCount++;
+            }
+        }
+        
+        tokenIds = new uint256[](activeCount);
+        uint256[] memory balances = new uint256[](activeCount); // Track actual balances transferred
+        uint256 index;
+        
+        // Transfer each active position for this collateral token
+        for (uint256 i = 0; i < positions_.length; i++) {
+            uint256 tokenId = positions_[i];
+            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
+            
+            if (terms.active && terms.collateralToken == collateralToken) {
+                tokenIds[index] = tokenId;
+                
+                // Get the balance (amount/notional) of this token held by the liquidated owner
+                uint256 balance = instrument.balanceOf(liquidatedOwner, tokenId);
+                balances[index] = balance;
+                index++;
+
+                if (balance > 0) {
+                    // Transfer the token from liquidated owner to liquidator owner
+                    instrument.transferPosition(liquidatedOwner, liquidatorOwner, tokenId, balance);
+                }
+                
+                // Add position to liquidator's account
+                accountTokenIds[liquidatorAccountId][collateralToken].push(tokenId);
+            }
+        }
+        
+        // Clear positions array for liquidated account (they've been transferred)
+        delete accountTokenIds[liquidatedAccount][collateralToken];
+        
+        // Update notional tracking
+        // Add notional to liquidator's owner for each transferred position (using actual balance)
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            whitelist.addNotional(liquidatorOwner, balances[i]);
+        }
+        
+        // Lock initial margin for the liquidator
+        if (imAmount > 0) {
+            marginVault.lockInitialMargin(liquidatorAccountId, collateralToken, imAmount);
+        }
+        
+        // Update maintenance margin for liquidator
+        uint256 newMMLiquidator = _updateAccountMaintenanceMargin(liquidatorAccountId, collateralToken);
+        
+        // Release IM from liquidated account (all IM for this token)
+        uint256 lockedIM = marginVault.getLockedIMByToken(liquidatedAccount, collateralToken);
+        if (lockedIM > 0) {
+            marginVault.releaseInitialMargin(liquidatedAccount, collateralToken, lockedIM);
+        }
+        
+        // Update maintenance margin for liquidated account
+        uint256 newMMLiquidated = _updateAccountMaintenanceMargin(liquidatedAccount, collateralToken);
+        
+        // Remove notional from liquidated account's owner (using actual balance)
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            whitelist.removeNotional(liquidatedOwner, balances[i]);
+        }
+
+        marginVault.settleVariationMargin(liquidatedAccount, collateralToken, - int256(premium));
+        marginVault.settleVariationMargin(liquidatorAccountId, collateralToken, int256(premium));
+        
+        emit PositionsAbsorbed(
+            liquidatedAccount,
+            liquidatorAccountId,
+            tokenIds,
+            collateralToken,
+            - int256(premium),
+            newMMLiquidated,
+            newMMLiquidator
+        );
+    }
+
     // ─── View Functions ─────────────────────────────────────────────────
 
     /// @notice Get the EIP-712 digest for a matched trade.
@@ -112,7 +343,45 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
         return (tt.tokenIdA, tt.tokenIdB, tt.active);
     }
 
-    // ─── ReceiverTemplate Implementation ─────────────────────────────────
+    /// @notice Get the EIP-712 digest for a position transfer.
+    /// @param toAccountId The recipient account ID.
+    /// @param tokenId The token ID to transfer.
+    /// @param amount The amount to transfer.
+    /// @param nonce The nonce for replay protection.
+    /// @param deadline The deadline for the signature.
+    /// @return The EIP-712 typed data hash.
+    function getPositionTransferDigest(
+        bytes32 toAccountId,
+        uint256 tokenId,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline
+    ) external view returns (bytes32) {
+        return _hashTypedDataV4(_positionTransferStructHash(toAccountId, tokenId, amount, nonce, deadline));
+    }
+
+    /// @notice Get the total IM requirement for an account's positions in a specific collateral token.
+    /// @param accountId The account to query.
+    /// @param collateralToken The collateral token to filter by.
+    /// @return totalIM The total IM required for all positions.
+    function getTotalIMForToken(
+        bytes32 accountId,
+        address collateralToken
+    ) external view returns (uint256 totalIM) {
+        uint256[] storage positions_ = accountTokenIds[accountId][collateralToken];
+        for (uint256 i = 0; i < positions_.length; i++) {
+            uint256 tokenId = positions_[i];
+            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
+            if (terms.active && terms.collateralToken == collateralToken) {
+                uint256 tenor = terms.maturityDate - terms.startDate;
+                totalIM += riskEngine.calculateIM(terms.notional, tenor);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PUBLIC FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
 
     /// @inheritdoc AccessControl
     /// @dev Overrides supportsInterface to include both AccessControl and ReceiverTemplate interfaces.
@@ -121,6 +390,12 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
     ) public view override(AccessControl, ReceiverTemplate) returns (bool) {
         return AccessControl.supportsInterface(interfaceId) || ReceiverTemplate.supportsInterface(interfaceId);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INTERNAL FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ─── ReceiverTemplate Implementation ─────────────────────────────────
 
     /// @notice Process the report data from Chainlink CRE.
     /// @dev Called by ReceiverTemplate.onReport() after validation.
@@ -278,6 +553,26 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
                 trade.nonce,
                 trade.deadline,
                 trade.collateralToken
+            )
+        );
+    }
+
+    /// @dev Compute the EIP-712 struct hash for a PositionTransfer.
+    function _positionTransferStructHash(
+        bytes32 toAccountId,
+        uint256 tokenId,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                POSITION_TRANSFER_TYPEHASH,
+                toAccountId,
+                tokenId,
+                amount,
+                nonce,
+                deadline
             )
         );
     }
@@ -542,287 +837,5 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
         uint256 newMM = riskEngine.calculateMM(lockedIM);
         riskEngine.updateMaintenanceMargin(accountId, collateralToken, newMM);
         return newMM;
-    }
-
-    // ─── Position Transfer ─────────────────────────────────────────────────
-
-    bytes32 public constant POSITION_TRANSFER_TYPEHASH = keccak256(
-        "PositionTransfer(bytes32 toAccountId,uint256 tokenId,uint256 amount,uint256 nonce,uint256 deadline)"
-    );
-
-    /// @notice Get the EIP-712 digest for a position transfer.
-    /// @param toAccountId The recipient account ID.
-    /// @param tokenId The token ID to transfer.
-    /// @param amount The amount to transfer.
-    /// @param nonce The nonce for replay protection.
-    /// @param deadline The deadline for the signature.
-    /// @return The EIP-712 typed data hash.
-    function getPositionTransferDigest(
-        bytes32 toAccountId,
-        uint256 tokenId,
-        uint256 amount,
-        uint256 nonce,
-        uint256 deadline
-    ) external view returns (bytes32) {
-        return _hashTypedDataV4(_positionTransferStructHash(toAccountId, tokenId, amount, nonce, deadline));
-    }
-
-    /// @dev Compute the EIP-712 struct hash for a PositionTransfer.
-    function _positionTransferStructHash(
-        bytes32 toAccountId,
-        uint256 tokenId,
-        uint256 amount,
-        uint256 nonce,
-        uint256 deadline
-    ) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                POSITION_TRANSFER_TYPEHASH,
-                toAccountId,
-                tokenId,
-                amount,
-                nonce,
-                deadline
-            )
-        );
-    }
-
-    /// @notice Transfer a position (or part of it) to another account.
-    /// @dev Called by the account owner to transfer their position to another whitelisted account.
-    ///      The recipient must have signed the agreement (be whitelisted with valid KYC).
-    ///      The recipient must sign an EIP-712 message approving the transfer.
-    ///      Handles margin requirements, notional tracking, and ERC-1155 token transfer.
-    /// @param toAccountId The account receiving the position.
-    /// @param tokenId The token ID to transfer.
-    /// @param amount The amount (notional) to transfer.
-    /// @param nonce The nonce for replay protection.
-    /// @param deadline The deadline for the signature.
-    /// @param toSignature The recipient's EIP-712 signature approving the transfer.
-    function transferPosition(
-        bytes32 toAccountId,
-        uint256 tokenId,
-        uint256 amount,
-        uint256 nonce,
-        uint256 deadline,
-        bytes calldata toSignature
-    ) external {
-        bytes32 fromAccountId = whitelist.getAccountId(msg.sender);
-        address fromOwner = msg.sender;
-
-        // ── Signature Verification ──
-        if (block.timestamp > deadline) revert SignatureExpired(deadline);
-        if (usedNonces[toAccountId][nonce]) revert NonceAlreadyUsed(toAccountId, nonce);
-        
-        bytes32 digest = _hashTypedDataV4(_positionTransferStructHash(toAccountId, tokenId, amount, nonce, deadline));
-        address signer = digest.recover(toSignature);
-        address toOwner = whitelist.getAccountOwner(toAccountId);
-        if (signer != toOwner) revert InvalidSignature(toAccountId);
-        
-        // Mark nonce as used
-        usedNonces[toAccountId][nonce] = true;
-
-        // ── Validate Recipient ──
-        if (toOwner == address(0)) revert AccountNotFound(toAccountId);
-        
-        // Check recipient is whitelisted and KYC is valid
-        if (!whitelist.isWhitelisted(toOwner)) revert RecipientNotWhitelisted(toAccountId);
-        
-        // ── Validate Position ──
-        if (amount == 0) revert InvalidNotional();
-        
-        IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
-        if (!terms.active) revert PositionNotActive(tokenId);
-        
-        // Check sender has sufficient balance
-        uint256 fromBalance = instrument.balanceOf(fromOwner, tokenId);
-        if (fromBalance < amount) revert InsufficientTokenBalance(tokenId, amount, fromBalance);
-        
-        // ── Check Recipient Notional Limit ──
-        if (!whitelist.checkNotionalLimit(toOwner, amount)) {
-            uint256 currentTotal = whitelist.getTotalOpenNotional(toOwner);
-            uint256 maxAllowed = whitelist.getMaxNotional(toOwner);
-            revert ExceedsMaxNotional(toAccountId, amount, currentTotal, maxAllowed);
-        }
-        
-        address collateralToken = terms.collateralToken;
-        uint256 tenor = terms.maturityDate - terms.startDate;
-
-        // ── Margin Adjustments ──
-        // Calculate IM required for the amount being transferred
-        uint256 imRequired = riskEngine.calculateIM(amount, tenor);
-        
-        // Release IM from sender
-        marginVault.releaseInitialMargin(fromAccountId, collateralToken, imRequired);
-
-        // Lock IM for recipient
-        marginVault.lockInitialMargin(toAccountId, collateralToken, imRequired);
-
-        // ── Transfer ERC-1155 Token ──
-        instrument.transferPosition(fromOwner, toOwner, tokenId, amount);
-
-        // ── Update Notional Tracking ──
-        whitelist.removeNotional(fromOwner, amount);
-        whitelist.addNotional(toOwner, amount);
-        
-        // ── Update Position Tracking ──
-        // Remove from sender's position list if fully transferred
-        if (fromBalance == amount) {
-            _removeTokenFromAccount(fromAccountId, collateralToken, tokenId);
-        }
-        
-        // Add to recipient's position list if not already there
-        bool found = false;
-        uint256[] storage toTokens = accountTokenIds[toAccountId][collateralToken];
-        for (uint256 i = 0; i < toTokens.length; i++) {
-            if (toTokens[i] == tokenId) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            toTokens.push(tokenId);
-        }
-        
-        // ── Update Maintenance Margins ──
-        uint256 newMMFrom = _updateAccountMaintenanceMargin(fromAccountId, collateralToken);
-        uint256 newMMTo = _updateAccountMaintenanceMargin(toAccountId, collateralToken);
-        
-        emit PositionTransferred(
-            tokenId,
-            fromAccountId,
-            toAccountId,
-            amount,
-            collateralToken,
-            newMMFrom,
-            newMMTo
-        );
-    }
-
-    // ─── Liquidation ────────────────────────────────────────────────────
-
-    /// @notice Transfer positions from a liquidated account to a liquidator.
-    /// @dev Called by the LiquidationEngine during absorbPosition.
-    ///      Handles the transfer of positions, margin requirements, and notional tracking.
-    ///      Also transfers ERC-1155 position tokens to maintain the invariant: token holder = position owner.
-    ///      Transfers the NPV of each position from liquidated account to liquidator (or vice versa).
-    ///      Also handles the liquidation premium payment to the liquidator.
-    /// @param liquidatedAccount The account being liquidated.
-    /// @param liquidatorAccountId The liquidator's account taking over positions.
-    /// @param collateralToken The collateral token for the liquidation.
-    /// @param imAmount The initial margin amount to lock for the liquidator.
-    /// @param premium The liquidation premium to pay to the liquidator.
-    /// @return tokenIds Array of tokenIds transferred.
-    function absorbPositions(
-        bytes32 liquidatedAccount,
-        bytes32 liquidatorAccountId,
-        address collateralToken,
-        uint256 imAmount,
-        uint256 premium
-    ) external onlyRole(LIQUIDATION_ENGINE_ROLE) returns (uint256[] memory tokenIds) {
-        // Get all positions for the liquidated account
-        uint256[] storage positions_ = accountTokenIds[liquidatedAccount][collateralToken];
-        
-        // Get owner addresses for token transfers
-        address liquidatedOwner = whitelist.getAccountOwner(liquidatedAccount);
-        address liquidatorOwner = whitelist.getAccountOwner(liquidatorAccountId);
-        
-        // Count active positions for this collateral token
-        uint256 activeCount;
-        for (uint256 i = 0; i < positions_.length; i++) {
-            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(positions_[i]);
-            if (terms.active && terms.collateralToken == collateralToken) {
-                activeCount++;
-            }
-        }
-        
-        tokenIds = new uint256[](activeCount);
-        uint256[] memory balances = new uint256[](activeCount); // Track actual balances transferred
-        uint256 index;
-        
-        // Transfer each active position for this collateral token
-        for (uint256 i = 0; i < positions_.length; i++) {
-            uint256 tokenId = positions_[i];
-            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
-            
-            if (terms.active && terms.collateralToken == collateralToken) {
-                tokenIds[index] = tokenId;
-                
-                // Get the balance (amount/notional) of this token held by the liquidated owner
-                uint256 balance = instrument.balanceOf(liquidatedOwner, tokenId);
-                balances[index] = balance;
-                index++;
-
-                if (balance > 0) {
-                    // Transfer the token from liquidated owner to liquidator owner
-                    instrument.transferPosition(liquidatedOwner, liquidatorOwner, tokenId, balance);
-                }
-                
-                // Add position to liquidator's account
-                accountTokenIds[liquidatorAccountId][collateralToken].push(tokenId);
-            }
-        }
-        
-        // Clear positions array for liquidated account (they've been transferred)
-        delete accountTokenIds[liquidatedAccount][collateralToken];
-        
-        // Update notional tracking
-        // Add notional to liquidator's owner for each transferred position (using actual balance)
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            whitelist.addNotional(liquidatorOwner, balances[i]);
-        }
-        
-        // Lock initial margin for the liquidator
-        if (imAmount > 0) {
-            marginVault.lockInitialMargin(liquidatorAccountId, collateralToken, imAmount);
-        }
-        
-        // Update maintenance margin for liquidator
-        uint256 newMMLiquidator = _updateAccountMaintenanceMargin(liquidatorAccountId, collateralToken);
-        
-        // Release IM from liquidated account (all IM for this token)
-        uint256 lockedIM = marginVault.getLockedIMByToken(liquidatedAccount, collateralToken);
-        if (lockedIM > 0) {
-            marginVault.releaseInitialMargin(liquidatedAccount, collateralToken, lockedIM);
-        }
-        
-        // Update maintenance margin for liquidated account
-        uint256 newMMLiquidated = _updateAccountMaintenanceMargin(liquidatedAccount, collateralToken);
-        
-        // Remove notional from liquidated account's owner (using actual balance)
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            whitelist.removeNotional(liquidatedOwner, balances[i]);
-        }
-
-        marginVault.settleVariationMargin(liquidatedAccount, collateralToken, - int256(premium));
-        marginVault.settleVariationMargin(liquidatorAccountId, collateralToken, int256(premium));
-        
-        emit PositionsAbsorbed(
-            liquidatedAccount,
-            liquidatorAccountId,
-            tokenIds,
-            collateralToken,
-            - int256(premium),
-            newMMLiquidated,
-            newMMLiquidator
-        );
-    }
-
-    /// @notice Get the total IM requirement for an account's positions in a specific collateral token.
-    /// @param accountId The account to query.
-    /// @param collateralToken The collateral token to filter by.
-    /// @return totalIM The total IM required for all positions.
-    function getTotalIMForToken(
-        bytes32 accountId,
-        address collateralToken
-    ) external view returns (uint256 totalIM) {
-        uint256[] storage positions_ = accountTokenIds[accountId][collateralToken];
-        for (uint256 i = 0; i < positions_.length; i++) {
-            uint256 tokenId = positions_[i];
-            IRSInstrument.SwapTerms memory terms = instrument.getSwapTerms(tokenId);
-            if (terms.active && terms.collateralToken == collateralToken) {
-                uint256 tenor = terms.maturityDate - terms.startDate;
-                totalIM += riskEngine.calculateIM(terms.notional, tenor);
-            }
-        }
     }
 }

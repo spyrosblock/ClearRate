@@ -9,10 +9,6 @@ import {Script, console} from "forge-std/Script.sol";
 abstract contract ClearRateScript is Script {
     // ─── Configuration ──────────────────────────────────────────────────
 
-    /// @notice Ethereum Sepolia USDC token address.
-    /// @dev From CONTINUE.md: 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
-    address internal constant SEPOLIA_USDC = address(0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238);
-
     /// @notice Default accepted tokens array for margin vaults.
     address[] internal acceptedTokens;
 
@@ -27,9 +23,6 @@ abstract contract ClearRateScript is Script {
     // ─── Initialization ─────────────────────────────────────────────────
 
     constructor() {
-        // Initialize default accepted tokens (USDC on Ethereum Sepolia)
-        acceptedTokens.push(SEPOLIA_USDC);
-
         // Add mock collateral token for testing from .env
         string memory mockTokenStr = vm.envString("MOCK_COLLATERAL_TOKEN");
         address mockToken = _parseAddress(mockTokenStr);
