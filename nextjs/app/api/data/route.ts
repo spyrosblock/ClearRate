@@ -90,15 +90,15 @@ export async function GET() {
     } else {
       const header = '│ ID │ Address        │ Company Name          │ Country │ Email                   │ Approved │ Max Notional     │';
       output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(17) + '┤\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(23) + '┼' + '─'.repeat(9) + '┼' + '─'.repeat(25) + '┼' + '─'.repeat(10) + '┼' + '─'.repeat(17) + '┤\n';
 
       for (const user of users) {
         const id = String(user.id).padEnd(2).slice(0, 2);
         const address = formatId(String(user.address)).padEnd(14);
         const company = truncate(String(user.company_name), 21).padEnd(21);
-        const country = String(user.registered_country).padEnd(6);
+        const country = String(user.registered_country).padEnd(7);
         const email = truncate(String(user.contact_email), 23).padEnd(23);
-        const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(7);
+        const approved = (user.approved ? '✓ Yes' : '✗ No').padEnd(8);
         const maxNotional = truncate(formatBigNumber(String(user.max_notional || '0')), 15).padEnd(15);
 
         output += `│ ${id} │ ${address} │ ${company} │ ${country} │ ${email} │ ${approved} │ ${maxNotional} │\n`;
@@ -108,17 +108,17 @@ export async function GET() {
     output += `Total: ${users.length} | Approved: ${users.filter(u => u.approved).length} | Pending: ${users.filter(u => !u.approved).length}\n\n`;
 
     // ============ SWAP POSITIONS TABLE ============
-    output += '┌' + '─'.repeat(115) + '┐\n';
-    output += '│' + ' SWAP POSITIONS'.padEnd(115) + '│\n';
-    output += '├' + '─'.repeat(115) + '┤\n';
+    output += '┌' + '─'.repeat(129) + '┐\n';
+    output += '│' + ' SWAP POSITIONS'.padEnd(129) + '│\n';
+    output += '├' + '─'.repeat(129) + '┤\n';
 
     if (swapPositions.length === 0) {
       output += '│' + ' (no positions found)'.padEnd(98) + '│\n';
     } else {
       // Table header
-      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start             │ Maturity          │ Active │';
+      const header = '│ ID │ Token ID       │ Owner ID      │ Notional       │ Rate   │ Direction  │ Start               │ Maturity          │ Active │';
       output += header + '\n';
-      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(8) + '┤\n';
+      output += '├' + '─'.repeat(4) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(15) + '┼' + '─'.repeat(16) + '┼' + '─'.repeat(8) + '┼' + '─'.repeat(12) + '┼' + '─'.repeat(21) + '┼' + '─'.repeat(19) + '┼' + '─'.repeat(8) + '┤\n';
 
       for (const pos of swapPositions) {
         const id = String(pos.id).padEnd(2).slice(0, 2);
@@ -134,13 +134,13 @@ export async function GET() {
         output += `│ ${id} │ ${tokenId} │ ${ownerId} │ ${notional} │ ${rate} │ ${direction} │ ${startDate} │ ${maturityDate} │ ${active.padEnd(6)} │\n`;
       }
     }
-    output += '└' + '─'.repeat(115) + '┘\n';
+    output += '└' + '─'.repeat(129) + '┘\n';
     output += `Total: ${swapPositions.length} | Active: ${swapPositions.filter(p => p.active).length} | Inactive: ${swapPositions.filter(p => !p.active).length}\n\n`;
 
 
     // ============ LIQUIDATION MONITORING TABLE ============
     output += '┌' + '─'.repeat(115) + '┐\n';
-    output += '│' + ' LIQUIDATION MONITORING'.padEnd(105) + '│\n';
+    output += '│' + ' LIQUIDATION MONITORING'.padEnd(115) + '│\n';
     output += '├' + '─'.repeat(115) + '┤\n';
 
     if (liquidationMonitoring.length === 0) {
@@ -167,7 +167,7 @@ export async function GET() {
         output += `│ ${id} │ ${accountId} │ ${collateralToken} │ ${totalCollateral} │ ${maintenanceMargin} │ ${health.padEnd(8)} │ ${updated} │\n`;
       }
     }
-    output += '└' + '─'.repeat(105) + '┘\n';
+    output += '└' + '─'.repeat(115) + '┘\n';
 
     const underCollateralized = liquidationMonitoring.filter(lm => {
       const collateral = BigInt(lm.total_collateral as string || '0');
