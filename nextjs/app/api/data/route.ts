@@ -144,7 +144,7 @@ export async function GET() {
     output += '├' + '─'.repeat(115) + '┤\n';
 
     if (liquidationMonitoring.length === 0) {
-      output += '│' + ' (no monitoring records found)'.padEnd(98) + '│\n';
+      output += '│' + ' (no monitoring records found)'.padEnd(115) + '│\n';
     } else {
       const header = '│ ID │ Account ID     │ Collateral Token   │ Total Collateral │ Maintenance Margin │ Health   │ Updated             │';
       output += header + '\n';
