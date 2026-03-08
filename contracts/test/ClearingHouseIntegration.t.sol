@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IClearingHouse} from "./../src/interfaces/IClearingHouse.sol";
 import {ClearingHouse} from "./../src/core/ClearingHouse.sol";
@@ -334,7 +334,7 @@ contract ClearingHouseIntegrationTest is Test {
         
         // Check NPV was updated
         IRSInstrument.SwapTerms memory termsAAfterVM = instrument.getSwapTerms(tokenIdA);
-        assertEq(termsAAfterVM.lastNpv, uint256(npvChangeA), "Alice's NPV should be updated");
+        assertEq(termsAAfterVM.lastNpv, npvChangeA, "Alice's NPV should be updated");
         
         // Check VM was settled in margin vault
         // Alice: collateral increased by VM gain (positive vmChange = credit)
@@ -389,15 +389,22 @@ contract ClearingHouseIntegrationTest is Test {
             vmChange: finalBobVMChange
         });
         
+        // Create matured positions array - specify which positions to close
+        IClearingHouse.MaturedPosition[] memory maturedPositions = new IClearingHouse.MaturedPosition[](1);
+        maturedPositions[0] = IClearingHouse.MaturedPosition({
+            accountId: ALICE_ACCOUNT,
+            tokenId: tokenIdA
+        });
+        
         // Record collateral before final settlement
         uint256 aliceCollateralBeforeFinal = marginVault.getTotalCollateral(ALICE_ACCOUNT, address(usdc));
         uint256 bobCollateralBeforeFinal = marginVault.getTotalCollateral(BOB_ACCOUNT, address(usdc));
         
         // Submit final settlement via onReport (reportType = 2 for matured position settlement)
-        bytes memory finalReport = abi.encode(uint8(2), finalNpvChanges, finalVmSettlements);
+        bytes memory finalReport = abi.encode(uint8(2), finalNpvChanges, finalVmSettlements, maturedPositions);
         
         vm.expectEmit(true, false, false, true, address(clearingHouse));
-        emit IClearingHouse.PositionMatured(tokenIdA, bytes32(0), block.timestamp);
+        emit IClearingHouse.PositionMatured(tokenIdA, ALICE_ACCOUNT, 0);
         
         vm.prank(forwarder);
         clearingHouse.onReport("", finalReport);

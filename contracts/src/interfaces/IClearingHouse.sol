@@ -44,6 +44,13 @@ interface IClearingHouse {
         uint256 tokenId;    // The token that has matured
     }
 
+    /// @notice Tracks the token pair created from a trade.
+    struct TradeTokens {
+        uint256 tokenIdA;        // PAY_FIXED token
+        uint256 tokenIdB;        // RECEIVE_FIXED token
+        bool active;
+    }
+
     // ─── Events ─────────────────────────────────────────────────────────
 
     event TradeSubmitted(bytes32 indexed tradeId);

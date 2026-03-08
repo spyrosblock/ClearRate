@@ -33,15 +33,6 @@ contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHous
         "PositionTransfer(bytes32 toAccountId,uint256 tokenId,uint256 amount,uint256 nonce,uint256 deadline)"
     );
 
-    // ─── Structs ────────────────────────────────────────────────────────
-
-    /// @notice Tracks the token pair created from a trade.
-    struct TradeTokens {
-        uint256 tokenIdA;        // PAY_FIXED token
-        uint256 tokenIdB;        // RECEIVE_FIXED token
-        bool active;
-    }
-
     // ─── State ──────────────────────────────────────────────────────────
 
     /// @notice Core protocol dependencies.

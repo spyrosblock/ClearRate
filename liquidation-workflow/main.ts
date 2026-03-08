@@ -263,7 +263,7 @@ const executeLiquidationWorkflow = (runtime: Runtime<Config>): string => {
 		.sendRequest(
 			runtime,
 			(sendRequester, config) => fetchLiquidationTargets(runtime, sendRequester, config as Config),
-			ConsensusAggregationByFields<LiquidationTargetsResponse>({
+			ConsensusAggregationByFields({
 				success: median,
 				liquidationTargets: median as any,
 				count: median,
