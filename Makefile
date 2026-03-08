@@ -136,8 +136,10 @@ settle-vm:
 # ===============================================
 
 # Final variation margin settlement for all positions
-# Store PositionMatured Event (11) - ClearingHouse.sol
-# Store PositionMatured Event (17) - ClearingHouse.sol
+# Store PositionMatured Event (11) - ClearingHouse.sol  13
+# Store PositionMatured Event (17) - ClearingHouse.sol  19
+# May need more PositionMatured Events                  25
+#    if a swap position has been partially transfered
 settle-vm-final:
 	@echo "Settling variation margin..."
 	cd settle-vm-workflow && bun install
@@ -195,8 +197,8 @@ transfer-position:
 # ===============================================
 
 # Get margin data for all users
-get-margin-data:
-	cd contracts && make get-margin-data-sepolia
+get-onchain-data:
+	clear && cd contracts && make get-margin-data-sepolia
 
 # Get db data
 get-db-data:

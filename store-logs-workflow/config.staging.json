@@ -1,10 +1,10 @@
 {
   "evms": [
     {
-      "clearingHouseAddress": "0xbecf462997c4fa8ed117d20bc59bff32c29122d3",
-      "marginVaultAddress": "0x76d1a769c3b13696f40523c0483ac5ea7cb32a84",
-      "riskEngineAddress": "0x19d3705c40befcf6633d8276c2cb20c7ed37891e",
-      "liquidationEngineAddress": "0xf5f5dcc3345f4f9b73207d89b2f76002f112997d",
+      "clearingHouseAddress": "0xae4c1b4f55088835d64b885408782c314b8f283c",
+      "marginVaultAddress": "0xc6b4e4c2540d649bf655adb352f910f50026af1f",
+      "riskEngineAddress": "0x2619faf69134a30651e765a85517f34b39d0cc25",
+      "liquidationEngineAddress": "0x6fbae72ccf3cf23924eba860bec36ed6ed160ae6",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "2000000"
     }

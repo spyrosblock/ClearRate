@@ -15840,7 +15840,8 @@ var liquidationTargetsResponseSchema = exports_external.object({
     accountId: exports_external.string(),
     collateralToken: exports_external.string(),
     totalCollateral: exports_external.string(),
-    maintenanceMargin: exports_external.string()
+    maintenanceMargin: exports_external.string(),
+    startPremiumBps: exports_external.number()
   })).optional(),
   count: exports_external.number().optional(),
   message: exports_external.string().optional()
@@ -15894,10 +15895,11 @@ var writeLiquidationReport = (runtime2, evmConfig, targets) => {
     const t = targets[i2];
     runtime2.log(`  Target ${i2 + 1}: accountId=${t.accountId}, collateralToken=${t.collateralToken}`);
   }
-  const liquidationParams = parseAbiParameters("uint8, (bytes32 accountId, address collateralToken)[]");
+  const liquidationParams = parseAbiParameters("uint8, (bytes32 accountId, address collateralToken, uint256 startPremiumBps)[]");
   const liquidationTargets = targets.map((t) => ({
     accountId: t.accountId,
-    collateralToken: t.collateralToken
+    collateralToken: t.collateralToken,
+    startPremiumBps: t.startPremiumBps
   }));
   const reportData = encodeAbiParameters(liquidationParams, [
     0,
@@ -15944,7 +15946,8 @@ var executeLiquidationWorkflow = (runtime2) => {
   }
   const liquidationTargets = targets.map((t) => ({
     accountId: toBytes32(t.accountId),
-    collateralToken: toAddress(t.collateralToken)
+    collateralToken: toAddress(t.collateralToken),
+    startPremiumBps: BigInt(t.startPremiumBps)
   }));
   runtime2.log("Writing liquidation report to LiquidationEngine...");
   const txHash = writeLiquidationReport(runtime2, evmConfig, liquidationTargets);

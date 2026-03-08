@@ -2,7 +2,7 @@
   "schedule": "0 * * * *",
   "evms": [
     {
-      "liquidationEngineAddress": "0xf5f5dcc3345f4f9b73207d89b2f76002f112997d",
+      "liquidationEngineAddress": "0x6fbae72ccf3cf23924eba860bec36ed6ed160ae6",
       "chainSelectorName": "ethereum-testnet-sepolia",
       "gasLimit": "500000"
     }

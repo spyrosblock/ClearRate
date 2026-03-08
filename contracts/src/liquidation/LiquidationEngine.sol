@@ -12,9 +12,9 @@ import {Whitelist} from "../access/Whitelist.sol";
 import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 
 /// @title LiquidationEngine
-/// @notice Dutch auction liquidation mechanism for undercollateralized accounts.
-/// @dev When an account breaches maintenance margin, a Dutch auction begins where the
-///      liquidation incentive decays over time until a liquidator absorbs the positions.
+/// @notice Auction liquidation mechanism for undercollateralized accounts.
+/// @dev When an account breaches maintenance margin, an auction begins where the
+///      liquidation incentive increases over time until a liquidator absorbs the positions.
 ///      Inherits from ReceiverTemplate to receive liquidation reports from Chainlink CRE workflow.
 contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     using SafeERC20 for IERC20;
@@ -60,8 +60,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     /// @notice Default auction duration in seconds.
     uint256 public defaultAuctionDuration;
 
-    /// @notice Minimum premium at end of auction (0 = full decay).
-    uint256 public minPremiumBps;
+    /// @notice Maximum premium at end of auction in BPS (typically BPS = 100%).
+    uint256 public maxPremiumBps;
 
     // ─── Events ─────────────────────────────────────────────────────────
     event LiquidationStarted(
@@ -77,7 +77,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         bytes32 indexed liquidatorId,
         uint256 premium
     );
-    event AuctionParametersUpdated(uint256 duration, uint256 minPremiumBps);
+    event AuctionParametersUpdated(uint256 duration, uint256 maxPremiumBps);
 
     // ─── Errors ─────────────────────────────────────────────────────────
     error AccountNotLiquidatable(bytes32 accountId);
@@ -88,7 +88,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
     error LiquidatorNotWhitelisted(address liquidator);
     error InvalidReportType(uint8 reportType);
     error LiquidatorSameAsLiquidatedAccount(address liquidator);
-    error InvalidMinPremium();
+    error InvalidMaxPremium();
     error InvalidPremium();
 
     // ─── Constructor ────────────────────────────────────────────────────
@@ -123,8 +123,8 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
     // ─── Liquidation Functions ──────────────────────────────────────────
 
-    /// @notice Absorb positions from a liquidated account (Dutch auction bid).
-    /// @dev The premium decays linearly from startPremiumBps to minPremiumBps over the auction duration.
+    /// @notice Absorb positions from a liquidated account.
+    /// @dev The premium increases linearly from startPremiumBps to maxPremiumBps (or BPS) over the auction duration.
     ///      Liquidator takes over the positions and receives a premium from the account's remaining collateral.
     /// @param accountId The account whose positions to absorb.
     /// @param collateralToken The collateral token for the liquidation.
@@ -149,7 +149,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         // Get total IM requirement for the liquidated account's positions in this collateral token
         uint256 imRequired = clearingHouse.getTotalIMForToken(accountId, collateralToken);
 
-        // Calculate current premium (linear decay)
+        // Calculate current premium (linear increase)
         uint256 currentPremiumBps = _currentPremium(auction, elapsed);
 
         // Calculate the premium to pay to the liquidator
@@ -185,18 +185,18 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
 
     /// @notice Update default auction parameters.
     /// @param duration_ New default auction duration.
-    /// @param minPremium_ New minimum premium at auction end in BPS.
+    /// @param maxPremium_ New maximum premium at auction end in BPS.
     function setAuctionParameters(
         uint256 duration_,
-        uint256 minPremium_
+        uint256 maxPremium_
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (duration_ == 0) revert InvalidDuration();
-        if (minPremium_ > BPS) revert InvalidMinPremium();
+        if (maxPremium_ > BPS) revert InvalidMaxPremium();
 
         defaultAuctionDuration = duration_;
-        minPremiumBps = minPremium_;
+        maxPremiumBps = maxPremium_;
 
-        emit AuctionParametersUpdated(duration_, minPremium_);
+        emit AuctionParametersUpdated(duration_, maxPremium_);
     }
 
     // ─── View Functions ─────────────────────────────────────────────────
@@ -209,7 +209,7 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         if (!auction.active) revert NoActiveAuction(accountId);
 
         uint256 elapsed = block.timestamp - auction.startTime;
-        if (elapsed > auction.duration) return minPremiumBps;
+        if (elapsed > auction.duration) return maxPremiumBps > 0 ? maxPremiumBps : BPS;
 
         premiumBps = _currentPremium(auction, elapsed);
     }
@@ -249,14 +249,22 @@ contract LiquidationEngine is AccessControl, ReentrancyGuard, ReceiverTemplate {
         );
     }
 
-    /// @dev Calculate the current premium based on linear decay.
+    /// @dev Calculate the current premium based on linear increase.
+    ///      Premium increases from startPremiumBps to maxPremiumBps (or BPS if maxPremiumBps is 0).
     function _currentPremium(
         Auction storage auction,
         uint256 elapsed
     ) internal view returns (uint256) {
-        uint256 range = auction.startPremiumBps - minPremiumBps;
-        uint256 decay = (range * elapsed) / auction.duration;
-        return auction.startPremiumBps - decay;
+        // Use maxPremiumBps if set, otherwise default to BPS (100%)
+        uint256 endPremium = maxPremiumBps > 0 ? maxPremiumBps : BPS;
+        
+        // Calculate the range of increase
+        uint256 range = endPremium - auction.startPremiumBps;
+        
+        // Calculate the increase based on elapsed time
+        uint256 increase = (range * elapsed) / auction.duration;
+        
+        return auction.startPremiumBps + increase;
     }
 
     // ─── ReceiverTemplate Implementation ────────────────────────────────

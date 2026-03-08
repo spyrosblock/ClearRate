@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IClearingHouse} from "../interfaces/IClearingHouse.sol";
@@ -18,12 +17,10 @@ import {ReceiverTemplate} from "../interfaces/ReceiverTemplate.sol";
 ///      Inherits from ReceiverTemplate to receive reports from Chainlink CRE workflow.
 ///      Each IRS position is represented by a unique tokenId (ERC-1155). Actions operate on
 ///      individual tokenIds and depend on the amount (notional) of the token the user holds.
-contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTemplate, IClearingHouse {
+contract ClearingHouse is AccessControl, EIP712, ReceiverTemplate, IClearingHouse {
     using ECDSA for bytes32;
 
     // ─── Constants ──────────────────────────────────────────────────────
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    bytes32 public constant SETTLEMENT_ROLE = keccak256("SETTLEMENT_ROLE");
     bytes32 public constant LIQUIDATION_ENGINE_ROLE = keccak256("LIQUIDATION_ENGINE_ROLE");
 
     /// @dev EIP-712 typehash for MatchedTrade struct.
@@ -81,8 +78,6 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         address whitelist_
     ) EIP712("ClearRate CCP", "1") ReceiverTemplate(forwarder) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(OPERATOR_ROLE, admin);
-        _grantRole(SETTLEMENT_ROLE, admin);
 
         instrument = IRSInstrument(instrument_);
         marginVault = MarginVault(marginVault_);
@@ -461,6 +456,12 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         for (uint256 i; i < maturedPositions.length; ++i) {
             _closeMaturedPosition(maturedPositions[i].accountId, maturedPositions[i].tokenId);
         }
+
+        // Step 4: Set active to false in IRSInstrument
+        for (uint256 i; i < npvChanges.length; ++i) {
+            NPVChange memory pos = npvChanges[i];
+            instrument.setActiveStatus(pos.tokenId, false);
+        }
     }
 
     /// @dev Close a matured position and release locked margin.
@@ -503,10 +504,7 @@ contract ClearingHouse is AccessControl, ReentrancyGuard, EIP712, ReceiverTempla
         // 4. Burn the position tokens
         instrument.burnPosition(owner, tokenId, balance);
 
-        // 5. Set active status to false in IRSInstrument
-        instrument.setActiveStatus(tokenId, false);
-
-        // 6. Remove tokenId from account's position list
+        // 5. Remove tokenId from account's position list
         _removeTokenFromAccount(accountId, collateralToken, tokenId);
 
         emit PositionMatured(tokenId, accountId, newMM);
